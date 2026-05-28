@@ -15,7 +15,16 @@ requested_device_extensions : []cstring : {
 }
 
 main :: proc() {
-    renderer := engine.renderer_create("Renderer", APPLICATION_WIDTH, APPLICATION_HEIGHT, requested_validation_layers, requested_device_extensions)
+
+    renderer_create_info := engine.RendererCreateInfo{
+        app_name            = "Renderer",
+        extent              = {APPLICATION_WIDTH, APPLICATION_HEIGHT},
+        use_discrete_GPU    = true,
+        validation_layers   = requested_validation_layers,
+        device_extensions   = requested_device_extensions
+    }
+
+    renderer := engine.renderer_create(renderer_create_info)
     defer engine.renderer_destroy(&renderer)
 
     for !engine.window_should_close(renderer) {

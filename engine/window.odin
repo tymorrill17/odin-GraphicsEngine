@@ -2,11 +2,8 @@ package renderer
 
 import "vendor:glfw"
 import "core:log"
-import "core:strings"
 
 Window :: struct {
-    name:               string,
-
     glfw_window:        glfw.WindowHandle,
     glfw_monitor:       glfw.MonitorHandle,
     glfw_mode:          ^glfw.VidMode,
@@ -27,7 +24,7 @@ Window :: struct {
     resized:            bool,
 }
 
-window_create :: proc(width, height: i32, name: string) -> Window {
+window_create :: proc(width, height: i32, name: cstring) -> Window {
     window: Window
 
     window.should_close = false
@@ -39,23 +36,20 @@ window_create :: proc(width, height: i32, name: string) -> Window {
         log.panic("GLFW initialization failed!")
     }
 
-    window.name = name
-
     glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
     glfw.WindowHint(glfw.RESIZABLE, glfw.TRUE)
     glfw.WindowHint(glfw.VISIBLE, glfw.TRUE)
     window.glfw_window = glfw.CreateWindow(
         width,
         height,
-        strings.clone_to_cstring(name, context.temp_allocator),
+        name,
         nil, // May specify a monitor here to start in fullscreen
         nil)
-    log.debug("Checking window creation...");
 
     if window.glfw_window == nil {
         log.panic("Window creation failure")
     }
-    log.infof("Created a window titled: %s", window.name);
+    log.infof("Created a window titled: %s", name);
 
     window.glfw_monitor = glfw.GetPrimaryMonitor()
     if window.glfw_monitor == nil {
@@ -117,5 +111,12 @@ update_window_info :: proc(window: ^Window) {
     window.extent.x, window.extent.y           = glfw.GetWindowSize(window.glfw_window)
     window.draw_extent.x, window.draw_extent.y = glfw.GetFramebufferSize(window.glfw_window)
     window.position.x, window.position.y       = glfw.GetWindowPos(window.glfw_window)
+}
+
+@(private)
+surface_initialize :: proc(renderer: ^Renderer) {
+    if glfw.CreateWindowSurface(renderer.instance, renderer.window.glfw_window, nil, &renderer.surface) != .SUCCESS {
+        log.panic("Failed to create window surface!")
+    }
 }
 
