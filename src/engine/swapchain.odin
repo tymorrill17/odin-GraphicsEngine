@@ -14,6 +14,7 @@ Swapchain :: struct {
     n_swapchain_images: u32,
 }
 
+@(private)
 swapchain_recreate :: proc(renderer: ^Renderer) {
     vk.DeviceWaitIdle(renderer.logical_device)
     image_index: u32 = renderer.swapchain.image_index
@@ -23,6 +24,7 @@ swapchain_recreate :: proc(renderer: ^Renderer) {
     renderer.window.resized = false
 }
 
+@(private)
 swapchain_create :: proc(renderer: ^Renderer) {
     capabilities: vk.SurfaceCapabilitiesKHR
     vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(renderer.physical_device, renderer.surface, &capabilities)

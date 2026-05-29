@@ -6,7 +6,7 @@ import "core:c"
 import "core:strings"
 import "vendor:glfw"
 import vk "vendor:vulkan"
-import vma "../thirdparty/vma"
+import vma "../../thirdparty/vma"
 
 glob_ctx: runtime.Context
 
