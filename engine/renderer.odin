@@ -6,7 +6,7 @@ import "core:c"
 import "core:strings"
 import "vendor:glfw"
 import vk "vendor:vulkan"
-import vma "shared:vma"
+import vma "../thirdparty/vma"
 
 glob_ctx: runtime.Context
 
@@ -78,23 +78,22 @@ renderer_create :: proc(renderer_create_info: RendererCreateInfo) -> Renderer {
     renderer: Renderer
     renderer.window = window_create(rci.extent.x, rci.extent.y, rci.app_name)
 
-    vk.load_proc_addresses_global((rawptr)(glfw.GetInstanceProcAddress))
-    assert(vk.CreateInstance != nil, "Vulkan procs not loaded!")
-
     instance_initialize(&renderer, rci.app_name, "OdinRenderer", rci.validation_layers, []cstring{})
-    log.info("Created Instance")
-    vk.load_proc_addresses_instance(renderer.instance)
-
-    use_discrete_GPU: bool = true
 
     // The window surface needs the instance to be created, so do it now
     surface_initialize(&renderer)
-    devices_initialize(&renderer, use_discrete_GPU, rci.device_extensions)
+    devices_initialize(&renderer, renderer_create_info.use_discrete_GPU, rci.device_extensions)
+
+    vulkan_allocator_initialize(&renderer)
+
+    swapchain_create(&renderer)
 
     return renderer
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
+    swapchain_destroy(renderer)
+    vma.DestroyAllocator(renderer.allocator)
     vk.DestroyDevice(renderer.logical_device, nil)
     vk.DestroySurfaceKHR(renderer.instance, renderer.surface, nil)
     vk.DestroyInstance(renderer.instance, nil)
@@ -113,10 +112,6 @@ QueueFamily :: enum {
 DeviceQueues :: struct {
     indices:    [QueueFamily]int,
     queues:     [QueueFamily]vk.Queue,
-}
-
-Swapchain :: struct {
-
 }
 
 @(private)
@@ -142,6 +137,9 @@ instance_initialize :: proc(renderer: ^Renderer,
         return true
     }
 
+    vk.load_proc_addresses_global((rawptr)(glfw.GetInstanceProcAddress))
+    assert(vk.CreateInstance != nil, "Vulkan procs not loaded!")
+
     // If we pass in validation layers, we know we are using them
     validation_layers_enabled := false
     when ODIN_DEBUG {
@@ -156,12 +154,12 @@ instance_initialize :: proc(renderer: ^Renderer,
     vk.EnumerateInstanceVersion(&instance_version)
 
     app_info := vk.ApplicationInfo{
-        sType = vk.StructureType.APPLICATION_INFO,
-        pApplicationName = app_name,
-        applicationVersion = vk.MAKE_API_VERSION(1, 0, 0, 0),
-        pEngineName = engine_name,
-        engineVersion = vk.MAKE_API_VERSION(1, 0, 0, 0),
-        apiVersion = instance_version
+        sType               = vk.StructureType.APPLICATION_INFO,
+        pApplicationName    = app_name,
+        applicationVersion  = vk.MAKE_API_VERSION(1, 0, 0, 0),
+        pEngineName         = engine_name,
+        engineVersion       = vk.MAKE_API_VERSION(1, 0, 0, 0),
+        apiVersion          = instance_version
     }
 
     // This will return required extensions for the windowing API and validation layers, if used
@@ -195,6 +193,9 @@ instance_initialize :: proc(renderer: ^Renderer,
     if result != .SUCCESS {
         log.panic("Failed to create Vulkan instance: ", result)
     }
+
+    log.info("Created Instance")
+    vk.load_proc_addresses_instance(renderer.instance)
 }
 
 @(private)
@@ -340,6 +341,43 @@ select_physical_device :: proc(renderer: ^Renderer, request_discrete_GPU: bool, 
     }
 
     if (renderer.physical_device == nil) do log.panic("No suitable device found!")
+}
+
+@(private)
+vulkan_allocator_initialize :: proc(renderer: ^Renderer) {
+    // First, vma needs to be informed of the vulkan procedures
+    vulkan_functions := vma.VulkanFunctions{
+        GetPhysicalDeviceProperties       = vk.GetPhysicalDeviceProperties,
+        GetPhysicalDeviceMemoryProperties = vk.GetPhysicalDeviceMemoryProperties,
+        AllocateMemory                    = vk.AllocateMemory,
+        FreeMemory                        = vk.FreeMemory,
+        MapMemory                         = vk.MapMemory,
+        UnmapMemory                       = vk.UnmapMemory,
+        FlushMappedMemoryRanges           = vk.FlushMappedMemoryRanges,
+        InvalidateMappedMemoryRanges      = vk.InvalidateMappedMemoryRanges,
+        BindBufferMemory                  = vk.BindBufferMemory,
+        BindImageMemory                   = vk.BindImageMemory,
+        GetBufferMemoryRequirements       = vk.GetBufferMemoryRequirements,
+        GetImageMemoryRequirements        = vk.GetImageMemoryRequirements,
+        CreateBuffer                      = vk.CreateBuffer,
+        DestroyBuffer                     = vk.DestroyBuffer,
+        CreateImage                       = vk.CreateImage,
+        DestroyImage                      = vk.DestroyImage,
+        CmdCopyBuffer                     = vk.CmdCopyBuffer,
+    }
+
+    // Now create the allocator, passing in the vulkan function pointers
+    allocator_create_info := vma.AllocatorCreateInfo{
+        flags               = { .BUFFER_DEVICE_ADDRESS },
+        physicalDevice      = renderer.physical_device,
+        device              = renderer.logical_device,
+        instance            = renderer.instance,
+        pVulkanFunctions    = &vulkan_functions,
+    }
+
+    if vma.CreateAllocator(&allocator_create_info, &renderer.allocator) != .SUCCESS {
+        log.panic("Failed to create Vulkan memory allocator!")
+    }
 }
 
 @(private)
