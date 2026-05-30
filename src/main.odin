@@ -1,6 +1,6 @@
 package main
 
-import "engine"
+import "graphics"
 
 APPLICATION_WIDTH  :: 1920
 APPLICATION_HEIGHT :: 1080
@@ -16,7 +16,7 @@ requested_device_extensions : []cstring : {
 
 main :: proc() {
 
-    renderer_create_info := engine.RendererCreateInfo{
+    renderer_create_info := graphics.RendererCreateInfo{
         app_name            = "Renderer",
         extent              = {APPLICATION_WIDTH, APPLICATION_HEIGHT},
         use_discrete_GPU    = true,
@@ -24,11 +24,12 @@ main :: proc() {
         device_extensions   = requested_device_extensions
     }
 
-    renderer := engine.renderer_create(renderer_create_info)
-    defer engine.renderer_destroy(&renderer)
+    renderer: graphics.Renderer
+    graphics.renderer_initialize(&renderer, renderer_create_info)
+    defer graphics.renderer_shutdown(&renderer)
 
-    for !engine.window_should_close(renderer) {
-        engine.poll_events()
+    for !graphics.window_should_close(renderer) {
+        graphics.poll_events()
     }
 
 }

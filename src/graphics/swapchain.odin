@@ -30,7 +30,7 @@ acquire_next_image :: proc(renderer: ^Renderer, frame_index: int) {
 @(private)
 present_to_screen :: proc(renderer: ^Renderer, queue: vk.Queue, render_semaphore: ^vk.Semaphore) {
     present_info := vk.PresentInfoKHR{
-        sType               = vk.StructureType.PRESENT_INFO_KHR,
+        sType               = .PRESENT_INFO_KHR,
         pNext               = nil,
         waitSemaphoreCount  = 1,
         pWaitSemaphores     = render_semaphore,
@@ -116,7 +116,7 @@ swapchain_create :: proc(renderer: ^Renderer) {
     }
 
     swapchain_create_info := vk.SwapchainCreateInfoKHR{
-        sType               = vk.StructureType.SWAPCHAIN_CREATE_INFO_KHR,
+        sType               = .SWAPCHAIN_CREATE_INFO_KHR,
         surface             = renderer.surface,
         minImageCount       = renderer.swapchain.n_swapchain_images,
         imageFormat         = renderer.swapchain.image_format,

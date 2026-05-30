@@ -19,14 +19,14 @@ pool_sizes := []PoolSizeRatio {
 };
 
 device_features: vk.PhysicalDeviceFeatures
-device_features_11 := vk.PhysicalDeviceVulkan11Features{ sType = vk.StructureType.PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+device_features_11 := vk.PhysicalDeviceVulkan11Features{ sType = .PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
     shaderDrawParameters = true,
 }
-device_features_12 := vk.PhysicalDeviceVulkan12Features{ sType = vk.StructureType.PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+device_features_12 := vk.PhysicalDeviceVulkan12Features{ sType = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
     descriptorIndexing = true,
     bufferDeviceAddress = true,
 }
-device_features_13 := vk.PhysicalDeviceVulkan13Features{ sType = vk.StructureType.PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+device_features_13 := vk.PhysicalDeviceVulkan13Features{ sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
     synchronization2 = true,
     dynamicRendering = true,
 }
@@ -45,6 +45,7 @@ Renderer :: struct {
     debug_messenger:            vk.DebugUtilsMessengerEXT,
     logical_device:             vk.Device,
     physical_device:            vk.PhysicalDevice,
+    physical_device_properties: vk.PhysicalDeviceProperties,
     queues:                     [QueueFamily]vk.Queue,
     queue_indices:              [QueueFamily]u32,
     surface:                    vk.SurfaceKHR,
@@ -69,30 +70,27 @@ Renderer :: struct {
     render_scale:               f32,
 }
 
-renderer_create :: proc(renderer_create_info: RendererCreateInfo) -> Renderer {
+renderer_initialize :: proc(renderer: ^Renderer, renderer_create_info: RendererCreateInfo) {
     rci := renderer_create_info
     // Initialize logger to output to console
     logger := log.create_console_logger()
     context.logger = logger
     glob_ctx = context // Save this for the debug messenger callback
 
-    renderer: Renderer
     renderer.window = window_create(rci.extent.x, rci.extent.y, rci.app_name)
 
-    instance_initialize(&renderer, rci.app_name, "OdinRenderer", rci.validation_layers, []cstring{})
+    instance_initialize(renderer, rci.app_name, "OdinRenderer", rci.validation_layers, []cstring{})
 
     // The window surface needs the instance to be created, so do it now
-    surface_initialize(&renderer)
-    devices_initialize(&renderer, renderer_create_info.use_discrete_GPU, rci.device_extensions)
+    surface_initialize(renderer)
+    devices_initialize(renderer, renderer_create_info.use_discrete_GPU, rci.device_extensions)
 
-    vulkan_allocator_initialize(&renderer)
+    vulkan_allocator_initialize(renderer)
 
-    swapchain_create(&renderer)
-
-    return renderer
+    swapchain_create(renderer)
 }
 
-renderer_destroy :: proc(renderer: ^Renderer) {
+renderer_shutdown :: proc(renderer: ^Renderer) {
     swapchain_destroy(renderer)
     vma.DestroyAllocator(renderer.allocator)
     vk.DestroyDevice(renderer.logical_device, nil)
@@ -155,7 +153,7 @@ instance_initialize :: proc(renderer: ^Renderer,
     vk.EnumerateInstanceVersion(&instance_version)
 
     app_info := vk.ApplicationInfo{
-        sType               = vk.StructureType.APPLICATION_INFO,
+        sType               = .APPLICATION_INFO,
         pApplicationName    = app_name,
         applicationVersion  = vk.MAKE_API_VERSION(1, 0, 0, 0),
         pEngineName         = engine_name,
@@ -171,7 +169,7 @@ instance_initialize :: proc(renderer: ^Renderer,
     defer delete(extensions)
 
     instance_create_info := vk.InstanceCreateInfo{
-        sType = vk.StructureType.INSTANCE_CREATE_INFO,
+        sType = .INSTANCE_CREATE_INFO,
         pApplicationInfo = &app_info,
         enabledExtensionCount = u32(len(extensions)),
         ppEnabledExtensionNames = raw_data(extensions),
@@ -182,7 +180,7 @@ instance_initialize :: proc(renderer: ^Renderer,
 
     if validation_layers_enabled {
         debug_create_info := vk.DebugUtilsMessengerCreateInfoEXT{
-            sType           = vk.StructureType.DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+            sType           = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
             messageSeverity = { .VERBOSE, .ERROR },
             messageType     = { .GENERAL, .VALIDATION, .PERFORMANCE },
             pfnUserCallback = vk.ProcDebugUtilsMessengerCallbackEXT(vk_debug_callback)
@@ -251,7 +249,7 @@ devices_initialize :: proc(renderer: ^Renderer, request_discrete_GPU: bool, requ
     defer delete(queue_create_infos)
     for queue_index, _ in unique_queues {
         queue_create_info := vk.DeviceQueueCreateInfo{
-            sType               = vk.StructureType.DEVICE_QUEUE_CREATE_INFO,
+            sType               = .DEVICE_QUEUE_CREATE_INFO,
             queueFamilyIndex    = u32(queue_index),
             queueCount          = 1,
             pQueuePriorities    = &priority,
@@ -260,7 +258,7 @@ devices_initialize :: proc(renderer: ^Renderer, request_discrete_GPU: bool, requ
     }
 
     version_features := vk.PhysicalDeviceFeatures2{
-        sType       = vk.StructureType.PHYSICAL_DEVICE_FEATURES_2,
+        sType       = .PHYSICAL_DEVICE_FEATURES_2,
         features    = device_features,
         pNext       = &device_features_11,
     }
@@ -268,7 +266,7 @@ devices_initialize :: proc(renderer: ^Renderer, request_discrete_GPU: bool, requ
     device_features_12.pNext = &device_features_13
 
     device_create_info := vk.DeviceCreateInfo{
-        sType                   = vk.StructureType.DEVICE_CREATE_INFO,
+        sType                   = .DEVICE_CREATE_INFO,
         pNext                   = &version_features,
         queueCreateInfoCount    = u32(len(queue_create_infos)),
         pQueueCreateInfos       = raw_data(queue_create_infos),
@@ -285,6 +283,9 @@ devices_initialize :: proc(renderer: ^Renderer, request_discrete_GPU: bool, requ
     for queue_index, i in renderer.queue_indices {
         vk.GetDeviceQueue(renderer.logical_device, queue_index, 0, &renderer.queues[i])
     }
+
+    device_limits: vk.PhysicalDeviceLimits
+
 }
 
 @(private)
@@ -323,13 +324,12 @@ select_physical_device :: proc(renderer: ^Renderer, request_discrete_GPU: bool, 
             return false
         }
 
-        properties: vk.PhysicalDeviceProperties
-        vk.GetPhysicalDeviceProperties(device, &properties)
-
         free_all(context.temp_allocator)
 
         // If we request a discrete GPU and found a discrete GPU, use it
         // If we request an integrated GPU and found one, use it
+        properties: vk.PhysicalDeviceProperties
+        vk.GetPhysicalDeviceProperties(device, &properties)
         return (request_discrete_GPU == (properties.deviceType == vk.PhysicalDeviceType.DISCRETE_GPU))
     }
 
@@ -342,6 +342,8 @@ select_physical_device :: proc(renderer: ^Renderer, request_discrete_GPU: bool, 
     }
 
     if (renderer.physical_device == nil) do log.panic("No suitable device found!")
+
+    vk.GetPhysicalDeviceProperties(renderer.physical_device, &renderer.physical_device_properties)
 }
 
 @(private)

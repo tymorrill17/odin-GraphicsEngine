@@ -40,12 +40,12 @@ pipeline_cfg_delete :: proc(config: ^PipelineConfig) {
 
 pipeline_cfg_clear :: proc(config: ^PipelineConfig) {
     clear(&config.shader_modules)
-    config.input_assembly = { sType = vk.StructureType.PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO }
-    config.rasterizer = { sType = vk.StructureType.PIPELINE_RASTERIZATION_STATE_CREATE_INFO }
+    config.input_assembly = { sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO }
+    config.rasterizer = { sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO }
     config.color_blend_attachment = {}
-    config.multisampling = { sType = vk.StructureType.PIPELINE_MULTISAMPLE_STATE_CREATE_INFO }
-    config.depth_stencil = { sType = vk.StructureType.PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO }
-    config.rendering_info = { sType = vk.StructureType.PIPELINE_RENDERING_CREATE_INFO }
+    config.multisampling = { sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO }
+    config.depth_stencil = { sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO }
+    config.rendering_info = { sType = .PIPELINE_RENDERING_CREATE_INFO }
     config.color_attachment_format = vk.Format.UNDEFINED
     clear(&config.descriptor_layouts)
     clear(&config.push_constant_ranges)
@@ -55,7 +55,7 @@ pipeline_cfg_clear :: proc(config: ^PipelineConfig) {
 
 pipeline_cfg_build_pipeline :: proc(config: ^PipelineConfig, renderer: ^Renderer) -> Pipeline {
     vertex_input_state := vk.PipelineVertexInputStateCreateInfo{
-        sType = vk.StructureType.PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         vertexBindingDescriptionCount   = u32(len(config.vertex_binding_descriptions)),
         pVertexBindingDescriptions      = raw_data(config.vertex_binding_descriptions),
         vertexAttributeDescriptionCount = u32(len(config.vertex_attribute_descriptions)),
@@ -63,14 +63,14 @@ pipeline_cfg_build_pipeline :: proc(config: ^PipelineConfig, renderer: ^Renderer
     }
 
     viewport_state := vk.PipelineViewportStateCreateInfo{
-        sType = vk.StructureType.PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         viewportCount   = 1,
         scissorCount    = 1,
     }
 
     // Set up dummy color blending until we use transparent objects
     color_blending_state := vk.PipelineColorBlendStateCreateInfo{
-        sType = vk.StructureType.PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
         logicOpEnable   = false,
         logicOp         = vk.LogicOp.COPY,
         attachmentCount = 1,
@@ -79,7 +79,7 @@ pipeline_cfg_build_pipeline :: proc(config: ^PipelineConfig, renderer: ^Renderer
 
     states: []vk.DynamicState = { vk.DynamicState.VIEWPORT, vk.DynamicState.SCISSOR }
     dynamic_state := vk.PipelineDynamicStateCreateInfo{
-        sType = vk.StructureType.PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
         dynamicStateCount   = u32(len(states)),
         pDynamicStates      = raw_data(states),
     }
@@ -87,7 +87,7 @@ pipeline_cfg_build_pipeline :: proc(config: ^PipelineConfig, renderer: ^Renderer
     pipeline_layout := create_pipeline_layout(renderer, config.descriptor_layouts[:], config.push_constant_ranges[:])
 
     pipeline_info := vk.GraphicsPipelineCreateInfo{
-        sType = vk.StructureType.GRAPHICS_PIPELINE_CREATE_INFO,
+        sType = .GRAPHICS_PIPELINE_CREATE_INFO,
         pNext               = &config.rendering_info,
         stageCount          = u32(len(config.shader_modules)),
         pStages             = raw_data(config.shader_modules),
@@ -113,7 +113,7 @@ pipeline_cfg_build_pipeline :: proc(config: ^PipelineConfig, renderer: ^Renderer
 
 pipeline_cfg_add_shader :: proc(config: ^PipelineConfig, shader: Shader, entry_point: cstring = "main") {
     shader_stage_info := vk.PipelineShaderStageCreateInfo{
-        sType   = vk.StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
+        sType   = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage   = shader.stage,
         module  = shader.module,
         pName   = entry_point,
@@ -207,7 +207,7 @@ create_pipeline_layout :: proc(renderer: ^Renderer,
     descriptor_layouts: []vk.DescriptorSetLayout,
     push_constant_ranges: []vk.PushConstantRange) -> vk.PipelineLayout {
     pipeline_layout_info := vk.PipelineLayoutCreateInfo{
-        sType                   = vk.StructureType.PIPELINE_LAYOUT_CREATE_INFO,
+        sType                   = .PIPELINE_LAYOUT_CREATE_INFO,
         setLayoutCount          = u32(len(descriptor_layouts)),
         pSetLayouts             = raw_data(descriptor_layouts),
         pushConstantRangeCount  = u32(len(push_constant_ranges)),
