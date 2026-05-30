@@ -5,6 +5,8 @@ import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
 
+TIMEOUT :: 1000000000
+
 Swapchain :: struct {
     handle:             vk.SwapchainKHR,
     images:             []vk.Image,
@@ -12,6 +14,36 @@ Swapchain :: struct {
     image_format:       vk.Format,
     extent:             vk.Extent2D,
     n_swapchain_images: u32,
+}
+
+@(private)
+acquire_next_image :: proc(renderer: ^Renderer, frame_index: int) {
+    result := vk.AcquireNextImageKHR(renderer.logical_device, renderer.swapchain.handle,
+                TIMEOUT, renderer.frame_acquired_image_sem[frame_index], NULL_HANDLE, &renderer.swapchain.image_index)
+    if result == .ERROR_OUT_OF_DATE_KHR {
+        renderer.window.resized = true
+    } else if result != .SUCCESS {
+        log.panic("Failed to acquire next swapchain image!")
+    }
+}
+
+@(private)
+present_to_screen :: proc(renderer: ^Renderer, queue: vk.Queue, render_semaphore: ^vk.Semaphore) {
+    present_info := vk.PresentInfoKHR{
+        sType               = vk.StructureType.PRESENT_INFO_KHR,
+        pNext               = nil,
+        waitSemaphoreCount  = 1,
+        pWaitSemaphores     = render_semaphore,
+        swapchainCount      = 1,
+        pSwapchains         = &renderer.swapchain.handle,
+        pImageIndices       = &renderer.swapchain.image_index
+    }
+    result := vk.QueuePresentKHR(queue, &present_info)
+    if result == .ERROR_OUT_OF_DATE_KHR {
+        renderer.window.resized = true
+    } else if result != .SUCCESS {
+        log.panic("Failed to present to screen!")
+    }
 }
 
 @(private)
@@ -117,6 +149,7 @@ swapchain_create :: proc(renderer: ^Renderer) {
     vk.GetSwapchainImagesKHR(renderer.logical_device, renderer.swapchain.handle, &renderer.swapchain.n_swapchain_images, raw_data(renderer.swapchain.images))
 }
 
+@(private)
 swapchain_destroy :: proc(renderer: ^Renderer) {
     delete(renderer.swapchain.images)
     vk.DestroySwapchainKHR(renderer.logical_device, renderer.swapchain.handle, nil)

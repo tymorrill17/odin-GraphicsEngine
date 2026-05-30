@@ -8,6 +8,7 @@ import "vendor:glfw"
 import vk "vendor:vulkan"
 import vma "../../thirdparty/vma"
 
+NULL_HANDLE :: 0
 glob_ctx: runtime.Context
 
 pool_sizes := []PoolSizeRatio {
@@ -39,33 +40,33 @@ RendererCreateInfo :: struct {
 }
 
 Renderer :: struct {
-    window:                 Window,
-    instance:               vk.Instance,
-    debug_messenger:        vk.DebugUtilsMessengerEXT,
-    logical_device:         vk.Device,
-    physical_device:        vk.PhysicalDevice,
-    queues:                 [QueueFamily]vk.Queue,
-    queue_indices:          [QueueFamily]u32,
-    surface:                vk.SurfaceKHR,
-    allocator:              vma.Allocator,
-    swapchain:              Swapchain,
-    pipeline_builder:       PipelineBuilder,
-    //draw_image:           AllocatedImage,
-    //depth_image:          AllocatedImage,
-    command_pool:           vk.CommandPool,
-    frame_commands:         []vk.CommandBuffer,
-    immediate_command:      vk.CommandBuffer,
-    descriptor_builder:     DescriptorBuilder,
-    //shader_manager:       ShaderManager,
+    window:                     Window,
+    instance:                   vk.Instance,
+    debug_messenger:            vk.DebugUtilsMessengerEXT,
+    logical_device:             vk.Device,
+    physical_device:            vk.PhysicalDevice,
+    queues:                     [QueueFamily]vk.Queue,
+    queue_indices:              [QueueFamily]u32,
+    surface:                    vk.SurfaceKHR,
+    allocator:                  vma.Allocator,
+    swapchain:                  Swapchain,
+    //draw_image:               AllocatedImage,
+    //depth_image:              AllocatedImage,
+    command_pool:               vk.CommandPool,
+    frame_commands:             []vk.CommandBuffer,
+    immediate_command:          vk.CommandBuffer,
+    descriptor_builder:         DescriptorBuilder,
+    //shader_manager:           ShaderManager,
 
-    frame_acquired_image:   []vk.Semaphore, // Semaphore to let the GPU know the swapchain image has been acquired
-    frame_render_fence:     []vk.Fence, // Lets the GPU know that the CPU is done issuing rendering commands
+    frame_acquired_image_sem:   []vk.Semaphore, // Semaphore to let the GPU know the swapchain image has been acquired. One per frame
+    frame_render_fence:         []vk.Fence, // Lets the GPU know that the CPU is done issuing rendering commands. One per frame
+    swapchain_render_sem:       []vk.Semaphore, // Semaphore to let the GPU know no more rendering commands will be submitted. One per swapchain image
 
-    frame_number:           u64,
-    frame_index:            u32,
-    frames_in_flight:       u32,
+    frame_number:               u64,
+    frame_index:                u32,
+    frames_in_flight:           u32,
 
-    render_scale:           f32,
+    render_scale:               f32,
 }
 
 renderer_create :: proc(renderer_create_info: RendererCreateInfo) -> Renderer {
