@@ -84,15 +84,27 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     devices_initialize(renderer, renderer_cfg.use_discrete_GPU, renderer_cfg.device_extensions)
     vulkan_allocator_initialize(renderer)
     swapchain_create(renderer)
+    renderer.frames_in_flight = renderer.swapchain.n_swapchain_images
 
     // Create the draw and depth images
     render_extent := vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1}
     renderer.draw_image = image_create(renderer, render_extent, renderer.swapchain.image_format,
         { .TRANSFER_SRC, .TRANSFER_DST, .COLOR_ATTACHMENT })
     renderer.depth_image = image_create(renderer, render_extent, .D32_SFLOAT, { .DEPTH_STENCIL_ATTACHMENT })
+
+    command_pool_initialize(renderer)
+    // Allocate a command buffer for each frame in flight
+    renderer.frame_commands = make([]vk.CommandBuffer, renderer.frames_in_flight)
+    command_buffer_allocate(renderer, raw_data(renderer.frame_commands), u32(len(renderer.frame_commands)))
+
+    renderer.render_scale = 1
+    renderer.frame_index  = 0
+    renderer.frame_number = 0
 }
 
 renderer_shutdown :: proc(renderer: ^Renderer) {
+    delete(renderer.frame_commands)
+    vk.DestroyCommandPool(renderer.logical_device, renderer.command_pool, nil)
     image_destroy(renderer, &renderer.depth_image)
     image_destroy(renderer, &renderer.draw_image)
     swapchain_destroy(renderer)
@@ -107,15 +119,7 @@ window_should_close :: proc(renderer: Renderer) -> bool {
     return bool(glfw.WindowShouldClose(renderer.window.glfw_window))
 }
 
-QueueFamily :: enum {
-    graphics,
-    present,
-}
-
-DeviceQueues :: struct {
-    indices:    [QueueFamily]int,
-    queues:     [QueueFamily]vk.Queue,
-}
+// Instance
 
 @(private)
 instance_initialize :: proc(renderer: ^Renderer,
@@ -201,6 +205,18 @@ instance_initialize :: proc(renderer: ^Renderer,
     vk.load_proc_addresses_instance(renderer.instance)
 }
 
+// Queues
+
+QueueFamily :: enum {
+    graphics,
+    present,
+}
+
+DeviceQueues :: struct {
+    indices:    [QueueFamily]int,
+    queues:     [QueueFamily]vk.Queue,
+}
+
 @(private)
 get_queue_indices :: proc(renderer: ^Renderer) {
     for &queue in renderer.queue_indices {
@@ -235,6 +251,8 @@ get_queue_indices :: proc(renderer: ^Renderer) {
     // Make sure we actually found queues
     for q in renderer.queue_indices do if q == c.UINT32_MAX do log.panic("Failed to find device queues!");
 }
+
+// Devices
 
 @(private)
 devices_initialize :: proc(renderer: ^Renderer, request_discrete_GPU: bool, requested_extensions: []cstring) {
@@ -350,6 +368,8 @@ select_physical_device :: proc(renderer: ^Renderer, request_discrete_GPU: bool, 
     vk.GetPhysicalDeviceProperties(renderer.physical_device, &renderer.physical_device_properties)
 }
 
+// Allocator
+
 @(private)
 vulkan_allocator_initialize :: proc(renderer: ^Renderer) {
     // First, vma needs to be informed of the vulkan procedures
@@ -384,6 +404,76 @@ vulkan_allocator_initialize :: proc(renderer: ^Renderer) {
 
     if vma.CreateAllocator(&allocator_create_info, &renderer.allocator) != .SUCCESS {
         log.panic("Failed to create Vulkan memory allocator!")
+    }
+}
+
+// Command Pools and Buffers
+
+@(private)
+command_pool_initialize :: proc(renderer: ^Renderer) {
+
+    command_pool_info := vk.CommandPoolCreateInfo{
+        sType = .COMMAND_POOL_CREATE_INFO,
+        flags = { .RESET_COMMAND_BUFFER },
+        queueFamilyIndex = renderer.queue_indices[.graphics], // Creating for the graphics queue only
+    }
+
+    if vk.CreateCommandPool(renderer.logical_device, &command_pool_info, nil, &renderer.command_pool) != .SUCCESS {
+        log.panic("Failed to create command pool!")
+    }
+}
+
+@(private)
+command_buffer_allocate :: proc(renderer: ^Renderer, command_buffers: [^]vk.CommandBuffer, n_command_buffers: u32) {
+    alloc_info := vk.CommandBufferAllocateInfo{
+        sType               = .COMMAND_BUFFER_ALLOCATE_INFO,
+        commandPool         = renderer.command_pool,
+        level               = .PRIMARY,
+        commandBufferCount  = n_command_buffers,
+    }
+
+    if vk.AllocateCommandBuffers(renderer.logical_device, &alloc_info, command_buffers) != .SUCCESS {
+        log.panic("Failed to allocate command buffers from the pool!")
+    }
+}
+
+@(private)
+submit_to_queue :: proc(renderer: ^Renderer, cmd: vk.CommandBuffer, queue: vk.Queue,
+    wait_sem: vk.Semaphore, signal_sem: vk.Semaphore, fence: vk.Fence) {
+
+    cmd_submit_info := vk.CommandBufferSubmitInfo{
+        sType           = .COMMAND_BUFFER_SUBMIT_INFO,
+        commandBuffer   = cmd,
+    }
+
+    wait_sem_info := vk.SemaphoreSubmitInfo{
+        sType       = .SEMAPHORE_SUBMIT_INFO,
+        semaphore   = wait_sem,
+        value       = 1,
+        stageMask   = { .COLOR_ATTACHMENT_OUTPUT_KHR },
+        deviceIndex = 0
+    }
+
+    signal_sem_info := vk.SemaphoreSubmitInfo{
+        sType       = .SEMAPHORE_SUBMIT_INFO,
+        semaphore   = signal_sem,
+        value       = 1,
+        stageMask   = { .ALL_GRAPHICS },
+        deviceIndex = 0
+    }
+
+    submit_info := vk.SubmitInfo2{
+        sType                       = .SUBMIT_INFO_2,
+        waitSemaphoreInfoCount      = 1,
+        pWaitSemaphoreInfos         = &wait_sem_info,
+        commandBufferInfoCount      = 1,
+        pCommandBufferInfos         = &cmd_submit_info,
+        signalSemaphoreInfoCount    = 1,
+        pSignalSemaphoreInfos       = &signal_sem_info,
+    }
+
+    if vk.QueueSubmit2(queue, 1, &submit_info, fence) != .SUCCESS {
+        log.panic("Failed to submit command buffer to queue!")
     }
 }
 

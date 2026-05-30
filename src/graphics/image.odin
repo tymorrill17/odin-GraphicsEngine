@@ -162,6 +162,7 @@ image_copy_data_to_image :: proc(renderer: ^Renderer, image: ^Image, data: rawpt
 
 }
 
+@(private)
 color_attachment_info :: proc(image: Image, clear_value: ^vk.ClearValue) -> vk.RenderingAttachmentInfoKHR {
     return vk.RenderingAttachmentInfoKHR{
         sType = .RENDERING_ATTACHMENT_INFO,
@@ -173,6 +174,7 @@ color_attachment_info :: proc(image: Image, clear_value: ^vk.ClearValue) -> vk.R
     }
 }
 
+@(private)
 depth_attachment_info :: proc(image: Image) -> vk.RenderingAttachmentInfoKHR {
     return vk.RenderingAttachmentInfoKHR{
         sType = .RENDERING_ATTACHMENT_INFO,
