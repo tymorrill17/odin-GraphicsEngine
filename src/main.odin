@@ -16,7 +16,7 @@ requested_device_extensions : []cstring : {
 
 main :: proc() {
 
-    renderer_create_info := graphics.RendererCreateInfo{
+    renderer_config := graphics.RendererConfig{
         app_name            = "Renderer",
         extent              = {APPLICATION_WIDTH, APPLICATION_HEIGHT},
         use_discrete_GPU    = true,
@@ -25,7 +25,7 @@ main :: proc() {
     }
 
     renderer: graphics.Renderer
-    graphics.renderer_initialize(&renderer, renderer_create_info)
+    graphics.renderer_initialize(&renderer, renderer_config)
     defer graphics.renderer_shutdown(&renderer)
 
     for !graphics.window_should_close(renderer) {

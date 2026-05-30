@@ -16,7 +16,7 @@ Buffer :: struct {
     alignment:      u64, // device-specific data alignment
 }
 
-buffer_create :: proc(renderer: Renderer, instance_bytes: u64, instance_count: u64,
+buffer_create :: proc(renderer: ^Renderer, instance_bytes: u64, instance_count: u64,
     usage: vk.BufferUsageFlags, memory_usage: vma.MemoryUsage) -> Buffer {
 
     find_alignment :: proc(instance_bytes: u64, min_offset_alignment: u64) -> u64 {
@@ -34,6 +34,8 @@ buffer_create :: proc(renderer: Renderer, instance_bytes: u64, instance_count: u
     } else if (vk.BufferUsageFlags{ .UNIFORM_TEXEL_BUFFER, .STORAGE_TEXEL_BUFFER } & usage) != {} {
         // if there is a texel buffer, use the texel alignment
         min_offset_alignment = u64(renderer.physical_device_properties.limits.minTexelBufferOffsetAlignment)
+    } else {
+        min_offset_alignment = 1
     }
 
     new_buffer := Buffer{
@@ -61,21 +63,21 @@ buffer_create :: proc(renderer: Renderer, instance_bytes: u64, instance_count: u
     return new_buffer
 }
 
-buffer_destroy :: proc(renderer: Renderer, buffer: ^Buffer) {
+buffer_destroy :: proc(renderer: ^Renderer, buffer: ^Buffer) {
     vma.DestroyBuffer(renderer.allocator, buffer.handle, buffer.allocation)
 }
 
-buffer_map :: proc(renderer: Renderer, buffer: ^Buffer) {
+buffer_map :: proc(renderer: ^Renderer, buffer: ^Buffer) {
     if vma.MapMemory(renderer.allocator, buffer.allocation, &buffer.data) != .SUCCESS {
         log.panic("Failed to map memory to buffer!")
     }
 }
 
-buffer_unmap :: proc(renderer: Renderer, buffer: ^Buffer) {
+buffer_unmap :: proc(renderer: ^Renderer, buffer: ^Buffer) {
     vma.UnmapMemory(renderer.allocator, buffer.allocation)
 }
 
-buffer_write_data :: proc(renderer: Renderer, buffer: ^Buffer,
+buffer_write_data :: proc(renderer: ^Renderer, buffer: ^Buffer,
     data: rawptr, size: u64 = vk.WHOLE_SIZE, offset: u64 = 0) {
 
     if size == vk.WHOLE_SIZE {
@@ -86,7 +88,7 @@ buffer_write_data :: proc(renderer: Renderer, buffer: ^Buffer,
     }
 }
 
-buffer_write_data_at_index :: proc(renderer: Renderer, buffer: ^Buffer,
+buffer_write_data_at_index :: proc(renderer: ^Renderer, buffer: ^Buffer,
     data: rawptr, index: u64) {
 
     buffer_write_data(renderer, buffer, data, buffer.instance_bytes, index * buffer.alignment)

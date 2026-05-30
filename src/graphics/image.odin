@@ -19,8 +19,8 @@ Image :: struct {
     mip_levels:     u32,
 }
 
-image_create :: proc(renderer: Renderer, extent: vk.Extent3D, format: vk.Format,
-    usage: vk.ImageUsageFlags, use_mipmap: bool) -> Image {
+image_create :: proc(renderer: ^Renderer, extent: vk.Extent3D, format: vk.Format,
+    usage: vk.ImageUsageFlags, use_mipmap: bool = false) -> Image {
     new_image := Image{
         layout          = .UNDEFINED,
         extent          = extent,
@@ -75,7 +75,7 @@ image_create :: proc(renderer: Renderer, extent: vk.Extent3D, format: vk.Format,
     return new_image
 }
 
-image_destroy :: proc(renderer: Renderer, image: ^Image) {
+image_destroy :: proc(renderer: ^Renderer, image: ^Image) {
     vk.DestroyImageView(renderer.logical_device, image.view, nil)
     vma.DestroyImage(renderer.allocator, image.handle, image.allocation)
 }
@@ -152,7 +152,7 @@ image_copy_subimage :: proc(cmd: vk.CommandBuffer, src: Image, src_extent: vk.Ex
     vk.CmdBlitImage2(cmd, &blit_info)
 }
 
-image_copy_data_to_image :: proc(renderer: Renderer, image: ^Image, data: rawptr, pixel_bytes: u64) {
+image_copy_data_to_image :: proc(renderer: ^Renderer, image: ^Image, data: rawptr, pixel_bytes: u64) {
     data_size: u64 = u64(image.extent.width) * u64(image.extent.height) * u64(image.extent.depth) * pixel_bytes
 
     upload_buffer := buffer_create(renderer, data_size, 1, { .TRANSFER_SRC }, .CPU_TO_GPU)

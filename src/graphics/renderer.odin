@@ -31,7 +31,7 @@ device_features_13 := vk.PhysicalDeviceVulkan13Features{ sType = .PHYSICAL_DEVIC
     dynamicRendering = true,
 }
 
-RendererCreateInfo :: struct {
+RendererConfig :: struct {
     app_name:           cstring,
     extent:             int2,
     validation_layers:  []cstring,
@@ -51,8 +51,8 @@ Renderer :: struct {
     surface:                    vk.SurfaceKHR,
     allocator:                  vma.Allocator,
     swapchain:                  Swapchain,
-    //draw_image:               AllocatedImage,
-    //depth_image:              AllocatedImage,
+    draw_image:                 Image,
+    depth_image:                Image,
     command_pool:               vk.CommandPool,
     frame_commands:             []vk.CommandBuffer,
     immediate_command:          vk.CommandBuffer,
@@ -70,27 +70,31 @@ Renderer :: struct {
     render_scale:               f32,
 }
 
-renderer_initialize :: proc(renderer: ^Renderer, renderer_create_info: RendererCreateInfo) {
-    rci := renderer_create_info
+renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
+
     // Initialize logger to output to console
     logger := log.create_console_logger()
     context.logger = logger
     glob_ctx = context // Save this for the debug messenger callback
 
-    renderer.window = window_create(rci.extent.x, rci.extent.y, rci.app_name)
-
-    instance_initialize(renderer, rci.app_name, "OdinRenderer", rci.validation_layers, []cstring{})
-
+    renderer.window = window_create(renderer_cfg.extent.x, renderer_cfg.extent.y, renderer_cfg.app_name)
+    instance_initialize(renderer, renderer_cfg.app_name, "OdinRenderer", renderer_cfg.validation_layers, []cstring{})
     // The window surface needs the instance to be created, so do it now
     surface_initialize(renderer)
-    devices_initialize(renderer, renderer_create_info.use_discrete_GPU, rci.device_extensions)
-
+    devices_initialize(renderer, renderer_cfg.use_discrete_GPU, renderer_cfg.device_extensions)
     vulkan_allocator_initialize(renderer)
-
     swapchain_create(renderer)
+
+    // Create the draw and depth images
+    render_extent := vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1}
+    renderer.draw_image = image_create(renderer, render_extent, renderer.swapchain.image_format,
+        { .TRANSFER_SRC, .TRANSFER_DST, .COLOR_ATTACHMENT })
+    renderer.depth_image = image_create(renderer, render_extent, .D32_SFLOAT, { .DEPTH_STENCIL_ATTACHMENT })
 }
 
 renderer_shutdown :: proc(renderer: ^Renderer) {
+    image_destroy(renderer, &renderer.depth_image)
+    image_destroy(renderer, &renderer.draw_image)
     swapchain_destroy(renderer)
     vma.DestroyAllocator(renderer.allocator)
     vk.DestroyDevice(renderer.logical_device, nil)
