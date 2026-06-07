@@ -55,7 +55,9 @@ Renderer :: struct {
     depth_image:                Image,
     command_pool:               vk.CommandPool,
     frame_commands:             []vk.CommandBuffer,
+    immediate_command_pool:     vk.CommandPool,
     immediate_command:          vk.CommandBuffer,
+    immediate_submit_fence:     vk.Fence,
     descriptor_builder:         DescriptorBuilder,
     //shader_manager:           ShaderManager,
 
@@ -109,12 +111,20 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
         renderer.swapchain_render_sem[i] = semaphore_create(renderer)
     }
 
+    // inititalizes immediate_command_pool, immediate_command, and immediate_submit_fence
+    immediate_command_initialize(renderer)
+
     renderer.render_scale = 1
     renderer.frame_index  = 0
     renderer.frame_number = 0
 }
 
 renderer_shutdown :: proc(renderer: ^Renderer) {
+    // immediate command cleanup
+    fence_destroy(renderer, renderer.immediate_submit_fence)
+    vk.DestroyCommandPool(renderer.logical_device, renderer.immediate_command_pool, nil)
+
+    // frame synchronization cleanup
     for i in 0..<renderer.frames_in_flight {
         semaphore_destroy(renderer, renderer.frame_acquired_image_sem[i])
         fence_destroy(renderer, renderer.frame_render_fence[i])
@@ -125,15 +135,28 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
     delete(renderer.swapchain_render_sem)
     delete(renderer.frame_render_fence)
     delete(renderer.frame_acquired_image_sem)
+
+    // Command buffer cleanup
     delete(renderer.frame_commands)
     vk.DestroyCommandPool(renderer.logical_device, renderer.command_pool, nil)
+
+    // image cleanup
     image_destroy(renderer, &renderer.depth_image)
     image_destroy(renderer, &renderer.draw_image)
+
     swapchain_destroy(renderer)
+
+    // vma cleanup
     vma.DestroyAllocator(renderer.allocator)
+
+    // Device cleanup
     vk.DestroyDevice(renderer.logical_device, nil)
     vk.DestroySurfaceKHR(renderer.instance, renderer.surface, nil)
+
+    // Instance cleanup
     vk.DestroyInstance(renderer.instance, nil)
+
+    // Window cleanup
     window_destroy(&renderer.window)
 }
 
@@ -229,11 +252,13 @@ instance_initialize :: proc(renderer: ^Renderer,
 
 // Queues
 
+@(private)
 QueueFamily :: enum {
     graphics,
     present,
 }
 
+@(private)
 DeviceQueues :: struct {
     indices:    [QueueFamily]int,
     queues:     [QueueFamily]vk.Queue,
@@ -499,6 +524,70 @@ submit_to_queue :: proc(renderer: ^Renderer, cmd: vk.CommandBuffer, queue: vk.Qu
     }
 }
 
+@(private)
+immediate_command_initialize :: proc(renderer: ^Renderer) {
+    command_pool_info := vk.CommandPoolCreateInfo{
+        sType = .COMMAND_POOL_CREATE_INFO,
+        flags = { .TRANSIENT },
+        queueFamilyIndex = renderer.queue_indices[.graphics], // Creating for the graphics queue only
+    }
+
+    if vk.CreateCommandPool(renderer.logical_device, &command_pool_info, nil, &renderer.immediate_command_pool) != .SUCCESS {
+        log.panic("Failed to create immediate command pool!")
+    }
+
+    command_buffer_allocate(renderer, &renderer.immediate_command, 1)
+    renderer.immediate_submit_fence = fence_create(renderer, { .SIGNALED })
+}
+
+immediate_command_submit :: proc(renderer: ^Renderer, user_data: rawptr,
+    submit_proc: proc(cmd: vk.CommandBuffer, user_data: rawptr)) {
+
+    cmd := renderer.immediate_command
+    vk.ResetFences(renderer.logical_device, 1, &renderer.immediate_submit_fence)
+    vk.ResetCommandBuffer(cmd, {})
+
+    cmd_begin_info := command_buffer_begin_info()
+    vk.BeginCommandBuffer(cmd, &cmd_begin_info)
+
+    submit_proc(cmd, user_data)
+
+    vk.EndCommandBuffer(cmd)
+
+    // Submit the immediate command
+    cmd_submit_info := vk.CommandBufferSubmitInfo{
+        sType           = .COMMAND_BUFFER_SUBMIT_INFO,
+        commandBuffer   = cmd,
+    }
+
+    submit_info := vk.SubmitInfo2{
+        sType                       = .SUBMIT_INFO_2,
+        waitSemaphoreInfoCount      = 0,
+        pWaitSemaphoreInfos         = nil,
+        commandBufferInfoCount      = 1,
+        pCommandBufferInfos         = &cmd_submit_info,
+        signalSemaphoreInfoCount    = 0,
+        pSignalSemaphoreInfos       = nil,
+    }
+
+    if vk.QueueSubmit2(renderer.queues[.graphics], 1, &submit_info, renderer.immediate_submit_fence) != .SUCCESS {
+        log.panic("Failed to submit immediate command to queue!")
+    }
+
+    vk.WaitForFences(renderer.logical_device, 1, &renderer.immediate_submit_fence, true, c.UINT64_MAX)
+}
+
+@(private)
+command_buffer_begin_info :: proc(flags: vk.CommandBufferUsageFlags = {}) -> vk.CommandBufferBeginInfo {
+    begin_info := vk.CommandBufferBeginInfo{
+        sType               = .COMMAND_BUFFER_BEGIN_INFO,
+        flags               = flags,
+        pInheritanceInfo    = nil
+    }
+    return begin_info
+}
+
+@(private)
 semaphore_create :: proc(renderer: ^Renderer, flags: vk.SemaphoreCreateFlags = {}) -> vk.Semaphore {
     semaphore_info := vk.SemaphoreCreateInfo{
         sType = .SEMAPHORE_CREATE_INFO,
@@ -511,10 +600,12 @@ semaphore_create :: proc(renderer: ^Renderer, flags: vk.SemaphoreCreateFlags = {
     return new_sem
 }
 
+@(private)
 semaphore_destroy :: proc(renderer: ^Renderer, semaphore: vk.Semaphore) {
     vk.DestroySemaphore(renderer.logical_device, semaphore, nil)
 }
 
+@(private)
 fence_create :: proc(renderer: ^Renderer, flags: vk.FenceCreateFlags = {}) -> vk.Fence {
     fence_info := vk.FenceCreateInfo{
         sType = .FENCE_CREATE_INFO,
@@ -527,6 +618,7 @@ fence_create :: proc(renderer: ^Renderer, flags: vk.FenceCreateFlags = {}) -> vk
     return new_fence
 }
 
+@(private)
 fence_destroy :: proc(renderer: ^Renderer, fence: vk.Fence) {
     vk.DestroyFence(renderer.logical_device, fence, nil)
 }

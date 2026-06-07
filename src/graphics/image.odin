@@ -159,7 +159,35 @@ image_copy_data_to_image :: proc(renderer: ^Renderer, image: ^Image, data: rawpt
     defer buffer_destroy(renderer, &upload_buffer)
     buffer_write_data(renderer, &upload_buffer, data)
 
+    CommandCtx :: struct{
+        image:          ^Image,
+        upload_buffer:  Buffer,
+    }
 
+    copy_command_ctx := CommandCtx{
+        image = image,
+        upload_buffer = upload_buffer,
+    }
+
+    immediate_command_submit(renderer, &copy_command_ctx, proc(cmd: vk.CommandBuffer, user_data: rawptr) {
+        ctx := (^CommandCtx)(user_data)
+        image_transition(cmd, ctx.image, .TRANSFER_DST_OPTIMAL)
+
+        copy_info := vk.BufferImageCopy{
+            imageExtent = ctx.image.extent,
+            imageSubresource = {
+                aspectMask      = ctx.image.aspect_flags,
+                mipLevel        = 0,
+                baseArrayLayer  = 0,
+                layerCount      = ctx.image.mip_levels,
+            },
+        }
+
+        vk.CmdCopyBufferToImage(cmd, ctx.upload_buffer.handle, ctx.image.handle, .TRANSFER_DST_OPTIMAL, 1, &copy_info)
+        image_transition(cmd, ctx.image, .SHADER_READ_ONLY_OPTIMAL)
+    })
+
+    buffer_destroy(renderer, &upload_buffer)
 }
 
 @(private)
