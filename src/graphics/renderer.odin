@@ -97,12 +97,34 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.frame_commands = make([]vk.CommandBuffer, renderer.frames_in_flight)
     command_buffer_allocate(renderer, raw_data(renderer.frame_commands), u32(len(renderer.frame_commands)))
 
+    // Initialize per-frame synchronization objects
+    renderer.frame_acquired_image_sem = make([]vk.Semaphore, renderer.frames_in_flight)
+    renderer.frame_render_fence       = make([]vk.Fence, renderer.frames_in_flight)
+    for i in 0..<renderer.frames_in_flight {
+        renderer.frame_acquired_image_sem[i] = semaphore_create(renderer)
+        renderer.frame_render_fence[i]       = fence_create(renderer)
+    }
+    renderer.swapchain_render_sem = make([]vk.Semaphore, renderer.swapchain.n_swapchain_images)
+    for i in 0..<renderer.swapchain.n_swapchain_images {
+        renderer.swapchain_render_sem[i] = semaphore_create(renderer)
+    }
+
     renderer.render_scale = 1
     renderer.frame_index  = 0
     renderer.frame_number = 0
 }
 
 renderer_shutdown :: proc(renderer: ^Renderer) {
+    for i in 0..<renderer.frames_in_flight {
+        semaphore_destroy(renderer, renderer.frame_acquired_image_sem[i])
+        fence_destroy(renderer, renderer.frame_render_fence[i])
+    }
+    for i in 0..<renderer.swapchain.n_swapchain_images {
+        semaphore_destroy(renderer, renderer.swapchain_render_sem[i])
+    }
+    delete(renderer.swapchain_render_sem)
+    delete(renderer.frame_render_fence)
+    delete(renderer.frame_acquired_image_sem)
     delete(renderer.frame_commands)
     vk.DestroyCommandPool(renderer.logical_device, renderer.command_pool, nil)
     image_destroy(renderer, &renderer.depth_image)
@@ -475,6 +497,38 @@ submit_to_queue :: proc(renderer: ^Renderer, cmd: vk.CommandBuffer, queue: vk.Qu
     if vk.QueueSubmit2(queue, 1, &submit_info, fence) != .SUCCESS {
         log.panic("Failed to submit command buffer to queue!")
     }
+}
+
+semaphore_create :: proc(renderer: ^Renderer, flags: vk.SemaphoreCreateFlags = {}) -> vk.Semaphore {
+    semaphore_info := vk.SemaphoreCreateInfo{
+        sType = .SEMAPHORE_CREATE_INFO,
+        flags = flags
+    }
+    new_sem: vk.Semaphore
+    if vk.CreateSemaphore(renderer.logical_device, &semaphore_info, nil, &new_sem) != .SUCCESS {
+        log.panic("Failed to create semaphore!")
+    }
+    return new_sem
+}
+
+semaphore_destroy :: proc(renderer: ^Renderer, semaphore: vk.Semaphore) {
+    vk.DestroySemaphore(renderer.logical_device, semaphore, nil)
+}
+
+fence_create :: proc(renderer: ^Renderer, flags: vk.FenceCreateFlags = {}) -> vk.Fence {
+    fence_info := vk.FenceCreateInfo{
+        sType = .FENCE_CREATE_INFO,
+        flags = flags
+    }
+    new_fence: vk.Fence
+    if vk.CreateFence(renderer.logical_device, &fence_info, nil, &new_fence) != .SUCCESS {
+        log.panic("Failed to create fence!")
+    }
+    return new_fence
+}
+
+fence_destroy :: proc(renderer: ^Renderer, fence: vk.Fence) {
+    vk.DestroyFence(renderer.logical_device, fence, nil)
 }
 
 @(private)
