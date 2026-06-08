@@ -1,9 +1,9 @@
 package main
 
-import "graphics"
+import "renderer"
 
-APPLICATION_WIDTH  :: 1920
-APPLICATION_HEIGHT :: 1080
+APPLICATION_WIDTH  :: 1280
+APPLICATION_HEIGHT :: 720
 
 requested_validation_layers : []cstring : {
     "VK_LAYER_KHRONOS_validation", // Standard validation layer preset
@@ -16,7 +16,7 @@ requested_device_extensions : []cstring : {
 
 main :: proc() {
 
-    renderer_config := graphics.RendererConfig{
+    renderer_config := renderer.RendererConfig{
         app_name            = "Renderer",
         extent              = {APPLICATION_WIDTH, APPLICATION_HEIGHT},
         use_discrete_GPU    = true,
@@ -24,14 +24,14 @@ main :: proc() {
         device_extensions   = requested_device_extensions
     }
 
-    renderer: graphics.Renderer
-    graphics.renderer_initialize(&renderer, renderer_config)
-    defer graphics.renderer_shutdown(&renderer)
+    r: renderer.Renderer
+    renderer.renderer_initialize(&r, renderer_config)
+    defer renderer.renderer_shutdown(&r)
 
-    for !graphics.window_should_close(&renderer) {
-        graphics.poll_events()
+    for !renderer.window_should_close(&r) {
+        renderer.poll_events()
 
-        graphics.renderer_draw(&renderer)
+        renderer.draw(&r)
     }
 
 }
