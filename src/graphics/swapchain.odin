@@ -5,11 +5,10 @@ import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
 
-TIMEOUT :: 1000000000
-
 Swapchain :: struct {
     handle:             vk.SwapchainKHR,
-    images:             []vk.Image,
+    images:             []Image,
+    current_image:      ^Image,
     image_index:        u32,
     image_format:       vk.Format,
     extent:             vk.Extent2D,
@@ -17,14 +16,16 @@ Swapchain :: struct {
 }
 
 @(private)
-acquire_next_image :: proc(renderer: ^Renderer, frame_index: int) {
+acquire_next_image :: proc(renderer: ^Renderer) {
     result := vk.AcquireNextImageKHR(renderer.logical_device, renderer.swapchain.handle,
-                TIMEOUT, renderer.frame_acquired_image_sem[frame_index], NULL_HANDLE, &renderer.swapchain.image_index)
+                TIMEOUT, renderer.frame_acquired_image_sem[renderer.frame_index], NULL_HANDLE, &renderer.swapchain.image_index)
     if result == .ERROR_OUT_OF_DATE_KHR {
         renderer.window.resized = true
     } else if result != .SUCCESS {
         log.panic("Failed to acquire next swapchain image!")
     }
+
+    renderer.swapchain.current_image = &renderer.swapchain.images[renderer.swapchain.image_index]
 }
 
 @(private)
@@ -53,6 +54,7 @@ swapchain_recreate :: proc(renderer: ^Renderer) {
     swapchain_destroy(renderer)
     swapchain_create(renderer)
     renderer.swapchain.image_index = image_index
+    renderer.swapchain.current_image = &renderer.swapchain.images[renderer.swapchain.image_index]
     renderer.window.resized = false
 }
 
@@ -109,8 +111,8 @@ swapchain_create :: proc(renderer: ^Renderer) {
     renderer.swapchain.image_format = surface_format.format
 
     renderer.swapchain.n_swapchain_images = capabilities.minImageCount + 1
-    if (capabilities.maxImageCount > 0 &&
-        renderer.swapchain.n_swapchain_images > capabilities.maxImageCount) {
+    if capabilities.maxImageCount > 0 &&
+        renderer.swapchain.n_swapchain_images > capabilities.maxImageCount {
 
         renderer.swapchain.n_swapchain_images = capabilities.maxImageCount
     }
@@ -145,8 +147,22 @@ swapchain_create :: proc(renderer: ^Renderer) {
         log.panic("Failed to create swapchain!")
     }
 
-    renderer.swapchain.images = make([]vk.Image, renderer.swapchain.n_swapchain_images)
-    vk.GetSwapchainImagesKHR(renderer.logical_device, renderer.swapchain.handle, &renderer.swapchain.n_swapchain_images, raw_data(renderer.swapchain.images))
+    renderer.swapchain.images = make([]Image, renderer.swapchain.n_swapchain_images)
+    image_handles := make([]vk.Image, renderer.swapchain.n_swapchain_images)
+    defer delete(image_handles)
+    vk.GetSwapchainImagesKHR(renderer.logical_device, renderer.swapchain.handle, &renderer.swapchain.n_swapchain_images, raw_data(image_handles))
+    for image, i in image_handles {
+        renderer.swapchain.images[i] = Image{
+            handle          = image,
+            layout          = .UNDEFINED,
+            extent          = vk.Extent3D{ height = renderer.swapchain.extent.height, width = renderer.swapchain.extent.width, depth = 1 },
+            format          = renderer.swapchain.image_format,
+            aspect_flags    = { .COLOR, },
+            mip_levels      = 1,
+        }
+    }
+
+    renderer.swapchain.current_image = &renderer.swapchain.images[renderer.swapchain.image_index]
 }
 
 @(private)

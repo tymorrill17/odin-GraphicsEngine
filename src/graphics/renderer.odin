@@ -3,12 +3,15 @@ package renderer
 import "base:runtime"
 import "core:log"
 import "core:c"
+import "core:math"
 import "core:strings"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 import vma "../../thirdparty/vma"
 
 NULL_HANDLE :: 0
+TIMEOUT :: 1000000000
+
 glob_ctx: runtime.Context
 
 pool_sizes := []PoolSizeRatio {
@@ -104,7 +107,7 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.frame_render_fence       = make([]vk.Fence, renderer.frames_in_flight)
     for i in 0..<renderer.frames_in_flight {
         renderer.frame_acquired_image_sem[i] = semaphore_create(renderer)
-        renderer.frame_render_fence[i]       = fence_create(renderer)
+        renderer.frame_render_fence[i]       = fence_create(renderer, { .SIGNALED })
     }
     renderer.swapchain_render_sem = make([]vk.Semaphore, renderer.swapchain.n_swapchain_images)
     for i in 0..<renderer.swapchain.n_swapchain_images {
@@ -120,6 +123,8 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
 }
 
 renderer_shutdown :: proc(renderer: ^Renderer) {
+    renderer_wait_idle(renderer)
+
     // immediate command cleanup
     fence_destroy(renderer, renderer.immediate_submit_fence)
     vk.DestroyCommandPool(renderer.logical_device, renderer.immediate_command_pool, nil)
@@ -160,8 +165,112 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
     window_destroy(&renderer.window)
 }
 
-window_should_close :: proc(renderer: Renderer) -> bool {
+window_should_close :: proc(renderer: ^Renderer) -> bool {
     return bool(glfw.WindowShouldClose(renderer.window.glfw_window))
+}
+
+renderer_wait_idle :: proc(renderer: ^Renderer) {
+    vk.DeviceWaitIdle(renderer.logical_device)
+}
+
+renderer_draw :: proc(renderer: ^Renderer) {
+    if renderer.window.minimized do return
+    frame_index := renderer.frame_index
+
+    frame_render_fence := renderer.frame_render_fence[frame_index]
+    vk.WaitForFences(renderer.logical_device, 1, &frame_render_fence, true, TIMEOUT)
+    vk.ResetFences(renderer.logical_device, 1, &frame_render_fence)
+
+    acquire_next_image(renderer)
+    swapchain_image_index := renderer.swapchain.image_index
+
+    cmd := renderer.frame_commands[frame_index]
+    vk.ResetCommandBuffer(cmd, {})
+    begin_info := command_buffer_begin_info_struct()
+    if vk.BeginCommandBuffer(cmd, &begin_info) != .SUCCESS {
+        log.panic("Failed to begin draw command buffer!")
+    }
+
+	// Transition the images to writable format
+    image_transition(cmd, &renderer.draw_image, .GENERAL)
+    image_transition(cmd, &renderer.depth_image, .GENERAL)
+
+    clear_value := vk.ClearValue{
+        color = vk.ClearColorValue{ float32 = {0, 0, 0, 1 } },
+    }
+    color_attachment := color_attachment_info_struct(renderer.draw_image, &clear_value)
+    depth_attachment := depth_attachment_info_struct(renderer.depth_image)
+
+    draw_extent := vk.Extent2D{
+        width   = math.min(renderer.draw_image.extent.width, renderer.swapchain.extent.width),
+        height  = math.min(renderer.draw_image.extent.height, renderer.swapchain.extent.height)
+    }
+
+    render_info := rendering_info_struct(draw_extent, 1, &color_attachment, &depth_attachment)
+
+    viewport := vk.Viewport{
+        x           = 0,
+        y           = 0,
+        width       = f32(draw_extent.width),
+        height      = f32(draw_extent.height),
+        minDepth    = 0,
+        maxDepth    = 1,
+    }
+
+    scissor := vk.Rect2D{
+        offset = { 0, 0 },
+        extent = draw_extent,
+    }
+
+    vk.CmdBeginRendering(cmd, &render_info)
+
+    vk.CmdSetViewport(cmd, 0, 1, &viewport)
+    vk.CmdSetScissor(cmd, 0, 1, &scissor)
+
+    // Render commands go here
+
+    vk.CmdEndRendering(cmd)
+
+	// Transition images for copying and then presenting
+	// Draw image is going to be copied to the swapchain image, so transition it to a transfer source layout
+    image_transition(cmd, &renderer.draw_image, .TRANSFER_SRC_OPTIMAL)
+
+	// Swapchain image needs to be transitioned to a transfer destination layout
+    image_transition(cmd, renderer.swapchain.current_image, .TRANSFER_DST_OPTIMAL)
+
+    image_copy(cmd, renderer.draw_image, renderer.swapchain.current_image^)
+
+    // Here would be the time to draw immediate-mode GUIs
+
+	// Transition swapchain image to a presentation-ready layout
+    image_transition(cmd, renderer.swapchain.current_image, .PRESENT_SRC_KHR)
+
+    if vk.EndCommandBuffer(cmd) != .SUCCESS {
+        log.panic("Failed to end the draw command buffer!")
+    }
+
+    present_queue := renderer.queues[.present]
+    submit_to_queue(renderer, cmd, present_queue,
+        renderer.frame_acquired_image_sem[frame_index],
+        renderer.swapchain_render_sem[swapchain_image_index],
+        renderer.frame_render_fence[frame_index]
+    )
+    present_to_screen(renderer, present_queue, &renderer.swapchain_render_sem[swapchain_image_index])
+
+    renderer.frame_number += 1
+    renderer.frame_index = u32(renderer.frame_number % u64(renderer.frames_in_flight))
+}
+
+@(private)
+rendering_info_struct :: proc(extent: vk.Extent2D, color_attachment_count: u32, color_attachments: ^vk.RenderingAttachmentInfo, depth_attachment: ^vk.RenderingAttachmentInfo) -> vk.RenderingInfoKHR {
+    return vk.RenderingInfoKHR{
+        sType                   = .RENDERING_INFO_KHR,
+        layerCount              = 1,
+        colorAttachmentCount    = color_attachment_count,
+        pColorAttachments       = color_attachments,
+        pDepthAttachment        = depth_attachment,
+        renderArea              = { extent = extent, offset = { 0, 0 }, },
+    }
 }
 
 // Instance
@@ -410,7 +519,7 @@ select_physical_device :: proc(renderer: ^Renderer, request_discrete_GPU: bool, 
         }
     }
 
-    if (renderer.physical_device == nil) do log.panic("No suitable device found!")
+    if renderer.physical_device == nil do log.panic("No suitable device found!")
 
     vk.GetPhysicalDeviceProperties(renderer.physical_device, &renderer.physical_device_properties)
 }
@@ -547,8 +656,10 @@ immediate_command_submit :: proc(renderer: ^Renderer, user_data: rawptr,
     vk.ResetFences(renderer.logical_device, 1, &renderer.immediate_submit_fence)
     vk.ResetCommandBuffer(cmd, {})
 
-    cmd_begin_info := command_buffer_begin_info()
-    vk.BeginCommandBuffer(cmd, &cmd_begin_info)
+    cmd_begin_info := command_buffer_begin_info_struct()
+    if vk.BeginCommandBuffer(cmd, &cmd_begin_info) != .SUCCESS {
+        log.panic("Failed to begin immediate command buffer!")
+    }
 
     submit_proc(cmd, user_data)
 
@@ -574,11 +685,11 @@ immediate_command_submit :: proc(renderer: ^Renderer, user_data: rawptr,
         log.panic("Failed to submit immediate command to queue!")
     }
 
-    vk.WaitForFences(renderer.logical_device, 1, &renderer.immediate_submit_fence, true, c.UINT64_MAX)
+    vk.WaitForFences(renderer.logical_device, 1, &renderer.immediate_submit_fence, true, TIMEOUT)
 }
 
 @(private)
-command_buffer_begin_info :: proc(flags: vk.CommandBufferUsageFlags = {}) -> vk.CommandBufferBeginInfo {
+command_buffer_begin_info_struct :: proc(flags: vk.CommandBufferUsageFlags = {}) -> vk.CommandBufferBeginInfo {
     begin_info := vk.CommandBufferBeginInfo{
         sType               = .COMMAND_BUFFER_BEGIN_INFO,
         flags               = flags,

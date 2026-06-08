@@ -72,7 +72,7 @@ window_destroy :: proc(window: ^Window) {
 }
 
 set_fullscreen :: proc(window: ^Window, enable: bool) {
-    if (enable) {
+    if enable {
         window.saved_extent.x, window.saved_extent.y     = glfw.GetWindowSize(window.glfw_window)
         window.saved_position.x, window.saved_position.y = glfw.GetWindowPos(window.glfw_window)
 

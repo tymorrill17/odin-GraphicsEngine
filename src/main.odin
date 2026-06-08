@@ -28,8 +28,10 @@ main :: proc() {
     graphics.renderer_initialize(&renderer, renderer_config)
     defer graphics.renderer_shutdown(&renderer)
 
-    for !graphics.window_should_close(renderer) {
+    for !graphics.window_should_close(&renderer) {
         graphics.poll_events()
+
+        graphics.renderer_draw(&renderer)
     }
 
 }
