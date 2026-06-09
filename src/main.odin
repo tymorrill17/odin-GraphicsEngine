@@ -30,6 +30,7 @@ main :: proc() {
 
     for !renderer.window_should_close(&r) {
         renderer.poll_events()
+        renderer.resize_callback(&r)
 
         renderer.draw(&r)
     }
