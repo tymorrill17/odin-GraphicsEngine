@@ -68,6 +68,12 @@ Renderer :: struct {
     frame_render_fence:         []vk.Fence, // Lets the GPU know that the CPU is done issuing rendering commands. One per frame
     swapchain_render_sem:       []vk.Semaphore, // Semaphore to let the GPU know no more rendering commands will be submitted. One per swapchain image
 
+    // To avoid indexing the wrong frame-specific sync objects or command buffer
+    current_command:            ^vk.CommandBuffer,
+    current_acquired_image_sem: ^vk.Semaphore,
+    current_render_fence:       ^vk.Fence,
+    current_swpch_render_sem:   ^vk.Semaphore,
+
     frame_number:               u64,
     frame_index:                u32,
     frames_in_flight:           u32,
@@ -120,6 +126,11 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.render_scale = 1
     renderer.frame_index  = 0
     renderer.frame_number = 0
+
+    renderer.current_acquired_image_sem = &renderer.frame_acquired_image_sem[renderer.frame_index]
+    renderer.current_render_fence       = &renderer.frame_render_fence[renderer.frame_index]
+    renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[renderer.swapchain.image_index]
+    renderer.current_command            = &renderer.frame_commands[renderer.frame_index]
 }
 
 renderer_shutdown :: proc(renderer: ^Renderer) {
@@ -183,6 +194,7 @@ draw :: proc(renderer: ^Renderer) {
 
     acquire_next_image(renderer)
     swapchain_image_index := renderer.swapchain.image_index
+    renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[swapchain_image_index]
 
     cmd := renderer.frame_commands[frame_index]
     vk.ResetCommandBuffer(cmd, {})
@@ -234,13 +246,10 @@ draw :: proc(renderer: ^Renderer) {
 	// Transition images for copying and then presenting
 	// Draw image is going to be copied to the swapchain image, so transition it to a transfer source layout
     image_transition(cmd, &renderer.draw_image, .TRANSFER_SRC_OPTIMAL)
-
-	// Swapchain image needs to be transitioned to a transfer destination layout
-    image_transition(cmd, renderer.swapchain.current_image, .TRANSFER_DST_OPTIMAL)
-
+    image_transition(cmd, renderer.swapchain.current_image, .TRANSFER_DST_OPTIMAL) // Swapchain image needs to be transitioned to a transfer destination layout
     image_copy(cmd, renderer.draw_image, renderer.swapchain.current_image^)
 
-    // Here would be the time to draw immediate-mode GUIs
+    gui_draw(&renderer)
 
 	// Transition swapchain image to a presentation-ready layout
     image_transition(cmd, renderer.swapchain.current_image, .PRESENT_SRC_KHR)
@@ -259,6 +268,10 @@ draw :: proc(renderer: ^Renderer) {
 
     renderer.frame_number += 1
     renderer.frame_index = u32(renderer.frame_number % u64(renderer.frames_in_flight))
+
+    renderer.current_acquired_image_sem = &renderer.frame_acquired_image_sem[renderer.frame_index]
+    renderer.current_render_fence       = &renderer.frame_render_fence[renderer.frame_index]
+    renderer.current_command            = &renderer.frame_commands[renderer.frame_index]
 }
 
 resize_callback :: proc(renderer: ^Renderer) {
