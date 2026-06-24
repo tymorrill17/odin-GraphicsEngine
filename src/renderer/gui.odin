@@ -1,5 +1,6 @@
 package renderer
 
+import "core:log"
 import vk "vendor:vulkan"
 import "../../thirdparty/imgui"
 import "../../thirdparty/imgui/imgui_impl_glfw"
@@ -32,7 +33,7 @@ gui_initialize :: proc(renderer: ^Renderer) {
 
     descriptor_pool_info := vk.DescriptorPoolCreateInfo{
         sType = .DESCRIPTOR_POOL_CREATE_INFO,
-        flags = .FREE_DESCRIPTOR_SET,
+        flags = { .FREE_DESCRIPTOR_SET, },
         poolSizeCount = u32(len(pool_sizes)),
         pPoolSizes = raw_data(pool_sizes),
     }
@@ -52,9 +53,19 @@ gui_initialize :: proc(renderer: ^Renderer) {
         Queue               = renderer.queues[.graphics],
         MinImageCount       = renderer.frames_in_flight,
         ImageCount          = renderer.frames_in_flight,
-        DescriptorPool      = descriptor_pool,
+        DescriptorPool      = gui_descriptor_pool,
         UseDynamicRendering = true,
         PipelineInfoMain    = { PipelineRenderingCreateInfo = pipeline_rendering_info },
+    }
+
+    loaded := imgui_impl_vulkan.LoadFunctions( glob_vk_lib.instance_api_version,
+        proc "c" (function_name: cstring, user_data: rawptr) -> vk.ProcVoidFunction {
+            renderer := cast(^Renderer)user_data
+            return vk.GetInstanceProcAddr(renderer.instance, function_name)
+        },
+        renderer)
+    if !loaded {
+        log.panic("Failed to load imgui function pointers")
     }
 
     imgui_impl_vulkan.Init(&vulkan_init)
@@ -67,21 +78,27 @@ gui_destroy :: proc(renderer: ^Renderer) {
     vk.DestroyDescriptorPool(renderer.logical_device, gui_descriptor_pool, nil)
 }
 
+gui_start_frame :: proc() {
+    imgui_impl_vulkan.NewFrame()
+    imgui_impl_glfw.NewFrame()
+    imgui.NewFrame()
+}
+
 gui_draw :: proc(renderer: ^Renderer) {
-    cmd := renderer.current_command // Get the current frame's command buffer
+    cmd := renderer.current_command^ // Get the current frame's command buffer
 
     // We will be drawing to the swapchain image, so make sure it is in the GENERAL layout
     if renderer.swapchain.current_image.layout != .GENERAL {
         image_transition(cmd, renderer.swapchain.current_image, .GENERAL)
     }
-    color_attachment_info := color_attachment_info_struct(renderer.swapchain.current_image, nil)
+    color_attachment_info := color_attachment_info_struct(renderer.swapchain.current_image^, nil)
 
     // TODO: Should this be the image extent or the swapchain extent? I should test out.
     //       This may be a bug with desktop scaling issues
     draw_extent := renderer.swapchain.extent
     render_info := rendering_info_struct(draw_extent, 1, &color_attachment_info, nil)
 
-    vk.CmdBeginRendering(cmd)
+    vk.CmdBeginRendering(cmd, &render_info)
     imgui.Render()
     imgui_impl_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
     vk.CmdEndRendering(cmd)

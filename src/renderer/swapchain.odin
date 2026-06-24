@@ -151,6 +151,7 @@ swapchain_create :: proc(renderer: ^Renderer) {
     image_handles := make([]vk.Image, renderer.swapchain.n_swapchain_images)
     defer delete(image_handles)
     vk.GetSwapchainImagesKHR(renderer.logical_device, renderer.swapchain.handle, &renderer.swapchain.n_swapchain_images, raw_data(image_handles))
+
     for image, i in image_handles {
         renderer.swapchain.images[i] = Image{
             handle          = image,
@@ -160,6 +161,23 @@ swapchain_create :: proc(renderer: ^Renderer) {
             aspect_flags    = { .COLOR, },
             mip_levels      = 1,
         }
+
+        // Create associated image view. This is going to be a color aspect image view
+        subresource_range := vk.ImageSubresourceRange{
+            aspectMask = renderer.swapchain.images[i].aspect_flags,
+            baseMipLevel = 0,
+            levelCount = renderer.swapchain.images[i].mip_levels,
+            baseArrayLayer = 0,
+            layerCount = 1
+        }
+        image_view_info := vk.ImageViewCreateInfo{
+            sType = .IMAGE_VIEW_CREATE_INFO,
+            image = renderer.swapchain.images[i].handle,
+            viewType = .D2,
+            format = renderer.swapchain.images[i].format,
+            subresourceRange = subresource_range
+        }
+        vk.CreateImageView(renderer.logical_device, &image_view_info, nil, &renderer.swapchain.images[i].view)
     }
 
     renderer.swapchain.current_image = &renderer.swapchain.images[renderer.swapchain.image_index]
@@ -167,6 +185,9 @@ swapchain_create :: proc(renderer: ^Renderer) {
 
 @(private)
 swapchain_destroy :: proc(renderer: ^Renderer) {
+    for image in renderer.swapchain.images {
+        vk.DestroyImageView(renderer.logical_device, image.view, nil)
+    }
     delete(renderer.swapchain.images)
     vk.DestroySwapchainKHR(renderer.logical_device, renderer.swapchain.handle, nil)
 }

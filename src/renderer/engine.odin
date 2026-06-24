@@ -1,5 +1,6 @@
 package renderer
 
+import "core:dynlib"
 import "base:runtime"
 import "core:log"
 import "core:c"
@@ -12,7 +13,14 @@ import vma "../../thirdparty/vma"
 NULL_HANDLE :: 0
 TIMEOUT :: 1000000000
 
+VulkanLibrary :: struct {
+    get_instance_proc_addr: vk.ProcGetInstanceProcAddr,
+    library:                dynlib.Library,
+    instance_api_version:   u32,
+}
+
 glob_ctx: runtime.Context
+glob_vk_lib: VulkanLibrary
 
 pool_sizes := []PoolSizeRatio {
     {vk.DescriptorType.UNIFORM_BUFFER,         100},
@@ -83,6 +91,27 @@ Renderer :: struct {
 
 renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
 
+    // Load vulkan function pointers from the library
+    did_load: bool
+    when ODIN_OS == .Windows {
+        glob_vk_lib.library, did_load = dynlib.load_library("vulkan-1.dll")
+    } else {
+        glob_vk_lib.library, did_load = dynlib.load_library("libvulkan.so.1")
+        if !did_load { glob_vk_lib.library, did_load = dynlib.load_library("libvulkan.so") }
+    }
+
+    if !did_load || glob_vk_lib.library == nil {
+        log.panic("Failed to load vulkan function pointers!")
+    }
+    get_instance_proc_addr, found := dynlib.symbol_address(glob_vk_lib.library, "vkGetInstanceProcAddr")
+    if !found {
+        log.panic("Could not find vkGetInstanceProcAddr in vulkan library!")
+    }
+
+    vk.load_proc_addresses_global(get_instance_proc_addr)
+    assert(vk.CreateInstance != nil, "Vulkan procs not loaded!")
+    glob_vk_lib.get_instance_proc_addr = (vk.ProcGetInstanceProcAddr)(get_instance_proc_addr)
+
     // Initialize logger to output to console
     logger := log.create_console_logger()
     context.logger = logger
@@ -91,6 +120,16 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.window = window_create(renderer_cfg.extent.x, renderer_cfg.extent.y, renderer_cfg.app_name)
     instance_initialize(renderer, renderer_cfg.app_name, "OdinRenderer", renderer_cfg.validation_layers, []cstring{})
     // The window surface needs the instance to be created, so do it now
+
+    // Get the vulkan instance version
+    glob_vk_lib.instance_api_version = vk.API_VERSION_1_0
+	if vk.EnumerateInstanceVersion != nil {
+		res := vk.EnumerateInstanceVersion(&glob_vk_lib.instance_api_version)
+		if res != .SUCCESS {
+			glob_vk_lib.instance_api_version = vk.API_VERSION_1_0
+		}
+	}
+
     surface_initialize(renderer)
     devices_initialize(renderer, renderer_cfg.use_discrete_GPU, renderer_cfg.device_extensions)
     vulkan_allocator_initialize(renderer)
@@ -131,10 +170,15 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.current_render_fence       = &renderer.frame_render_fence[renderer.frame_index]
     renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[renderer.swapchain.image_index]
     renderer.current_command            = &renderer.frame_commands[renderer.frame_index]
+
+    // initialize the debug gui
+    gui_initialize(renderer)
 }
 
 renderer_shutdown :: proc(renderer: ^Renderer) {
     wait_idle(renderer)
+
+    gui_destroy(renderer)
 
     // immediate command cleanup
     fence_destroy(renderer, renderer.immediate_submit_fence)
@@ -174,6 +218,9 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
 
     // Window cleanup
     window_destroy(&renderer.window)
+
+    // Unload the vulkan library
+    dynlib.unload_library(glob_vk_lib.library)
 }
 
 window_should_close :: proc(renderer: ^Renderer) -> bool {
@@ -182,6 +229,13 @@ window_should_close :: proc(renderer: ^Renderer) -> bool {
 
 wait_idle :: proc(renderer: ^Renderer) {
     vk.DeviceWaitIdle(renderer.logical_device)
+}
+
+// Called at the beginning of every frame by the program
+start_frame :: proc(renderer: ^Renderer) {
+    poll_events()
+    resize_callback(renderer)
+    gui_start_frame()
 }
 
 draw :: proc(renderer: ^Renderer) {
@@ -249,7 +303,7 @@ draw :: proc(renderer: ^Renderer) {
     image_transition(cmd, renderer.swapchain.current_image, .TRANSFER_DST_OPTIMAL) // Swapchain image needs to be transitioned to a transfer destination layout
     image_copy(cmd, renderer.draw_image, renderer.swapchain.current_image^)
 
-    gui_draw(&renderer)
+    gui_draw(renderer)
 
 	// Transition swapchain image to a presentation-ready layout
     image_transition(cmd, renderer.swapchain.current_image, .PRESENT_SRC_KHR)
@@ -319,9 +373,6 @@ instance_initialize :: proc(renderer: ^Renderer,
         }
         return true
     }
-
-    vk.load_proc_addresses_global((rawptr)(glfw.GetInstanceProcAddress))
-    assert(vk.CreateInstance != nil, "Vulkan procs not loaded!")
 
     // If we pass in validation layers, we know we are using them
     validation_layers_enabled := false

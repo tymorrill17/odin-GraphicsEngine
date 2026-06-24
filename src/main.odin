@@ -1,5 +1,7 @@
 package main
 
+import "core:log"
+import "../thirdparty/imgui/"
 import "renderer"
 
 APPLICATION_WIDTH  :: 1280
@@ -29,10 +31,10 @@ main :: proc() {
     defer renderer.renderer_shutdown(&r)
 
     for !renderer.window_should_close(&r) {
-        renderer.poll_events()
-        renderer.resize_callback(&r)
+        renderer.start_frame(&r)
+
+        imgui.ShowDemoWindow()
 
         renderer.draw(&r)
     }
-
 }
