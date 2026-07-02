@@ -244,11 +244,10 @@ draw :: proc(renderer: ^Renderer) {
 
     frame_render_fence := renderer.frame_render_fence[frame_index]
     vk.WaitForFences(renderer.logical_device, 1, &frame_render_fence, true, TIMEOUT)
-    vk.ResetFences(renderer.logical_device, 1, &frame_render_fence)
-
     acquire_next_image(renderer)
     swapchain_image_index := renderer.swapchain.image_index
     renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[swapchain_image_index]
+    vk.ResetFences(renderer.logical_device, 1, &frame_render_fence)
 
     cmd := renderer.frame_commands[frame_index]
     vk.ResetCommandBuffer(cmd, {})
