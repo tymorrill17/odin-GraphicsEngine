@@ -63,6 +63,7 @@ window_create :: proc(width, height: i32, name: cstring) -> Window {
 
     glfw.ShowWindow(window.glfw_window)
     update_window_info(&window)
+
     return window
 }
 
@@ -100,6 +101,12 @@ update_window_info :: proc(window: ^Window) {
 }
 
 @(private)
+window_set_callbacks :: proc(renderer: ^Renderer) {
+    glfw.SetWindowUserPointer(renderer.window.glfw_window, renderer)
+    glfw.SetFramebufferSizeCallback(renderer.window.glfw_window, framebuffer_resize_callback)
+}
+
+@(private)
 get_required_vulkan_extensions :: proc(using_validation_layers: bool) -> [dynamic]cstring {
     extensions_cstr := glfw.GetRequiredInstanceExtensions()
     extensions := make([dynamic]cstring, 0, len(extensions_cstr))
@@ -119,3 +126,8 @@ surface_initialize :: proc(renderer: ^Renderer) {
     }
 }
 
+@(private)
+framebuffer_resize_callback :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
+    renderer := cast(^Renderer)glfw.GetWindowUserPointer(window)
+    renderer.window.resized = true
+}

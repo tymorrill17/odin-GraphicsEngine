@@ -19,7 +19,7 @@ Swapchain :: struct {
 acquire_next_image :: proc(renderer: ^Renderer) {
     result := vk.AcquireNextImageKHR(renderer.logical_device, renderer.swapchain.handle,
                 TIMEOUT, renderer.frame_acquired_image_sem[renderer.frame_index], NULL_HANDLE, &renderer.swapchain.image_index)
-    if result == .ERROR_OUT_OF_DATE_KHR {
+    if result == .ERROR_OUT_OF_DATE_KHR || result == .SUBOPTIMAL_KHR {
         renderer.window.resized = true
     } else if result != .SUCCESS {
         log.panic("Failed to acquire next swapchain image!")
@@ -40,7 +40,7 @@ present_to_screen :: proc(renderer: ^Renderer, queue: vk.Queue, render_semaphore
         pImageIndices       = &renderer.swapchain.image_index
     }
     result := vk.QueuePresentKHR(queue, &present_info)
-    if result == .ERROR_OUT_OF_DATE_KHR {
+    if result == .ERROR_OUT_OF_DATE_KHR || result == .SUBOPTIMAL_KHR {
         renderer.window.resized = true
     } else if result != .SUCCESS {
         log.panic("Failed to present to screen!")
@@ -55,7 +55,6 @@ swapchain_recreate :: proc(renderer: ^Renderer) {
     swapchain_create(renderer)
     renderer.swapchain.image_index = image_index
     renderer.swapchain.current_image = &renderer.swapchain.images[renderer.swapchain.image_index]
-    renderer.window.resized = false
 }
 
 @(private)
@@ -178,6 +177,7 @@ swapchain_create :: proc(renderer: ^Renderer) {
             subresourceRange = subresource_range
         }
         vk.CreateImageView(renderer.logical_device, &image_view_info, nil, &renderer.swapchain.images[i].view)
+
     }
 
     renderer.swapchain.current_image = &renderer.swapchain.images[renderer.swapchain.image_index]

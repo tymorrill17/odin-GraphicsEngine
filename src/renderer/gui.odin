@@ -95,6 +95,7 @@ gui_draw :: proc(renderer: ^Renderer) {
 
     // TODO: Should this be the image extent or the swapchain extent? I should test out.
     //       This may be a bug with desktop scaling issues
+    //       Methinks it should be swapchain image, since I don't want the gui to enlarge with the screen
     draw_extent := renderer.swapchain.extent
     render_info := rendering_info_struct(draw_extent, 1, &color_attachment_info, nil)
 

@@ -123,12 +123,12 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
 
     // Get the vulkan instance version
     glob_vk_lib.instance_api_version = vk.API_VERSION_1_0
-	if vk.EnumerateInstanceVersion != nil {
-		res := vk.EnumerateInstanceVersion(&glob_vk_lib.instance_api_version)
-		if res != .SUCCESS {
-			glob_vk_lib.instance_api_version = vk.API_VERSION_1_0
-		}
-	}
+    if vk.EnumerateInstanceVersion != nil {
+        res := vk.EnumerateInstanceVersion(&glob_vk_lib.instance_api_version)
+        if res != .SUCCESS {
+            glob_vk_lib.instance_api_version = vk.API_VERSION_1_0
+        }
+    }
 
     surface_initialize(renderer)
     devices_initialize(renderer, renderer_cfg.use_discrete_GPU, renderer_cfg.device_extensions)
@@ -244,9 +244,15 @@ draw :: proc(renderer: ^Renderer) {
 
     frame_render_fence := renderer.frame_render_fence[frame_index]
     vk.WaitForFences(renderer.logical_device, 1, &frame_render_fence, true, TIMEOUT)
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
     acquire_next_image(renderer)
     swapchain_image_index := renderer.swapchain.image_index
     renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[swapchain_image_index]
+    vk.ResetFences(renderer.logical_device, 1, &frame_render_fence)
+
     vk.ResetFences(renderer.logical_device, 1, &frame_render_fence)
 
     cmd := renderer.frame_commands[frame_index]
@@ -256,7 +262,7 @@ draw :: proc(renderer: ^Renderer) {
         log.panic("Failed to begin draw command buffer!")
     }
 
-	// Transition the images to writable format
+    // Transition the images to writable format
     image_transition(cmd, &renderer.draw_image, .GENERAL)
     image_transition(cmd, &renderer.depth_image, .GENERAL)
 
@@ -296,15 +302,15 @@ draw :: proc(renderer: ^Renderer) {
 
     vk.CmdEndRendering(cmd)
 
-	// Transition images for copying and then presenting
-	// Draw image is going to be copied to the swapchain image, so transition it to a transfer source layout
+    // Transition images for copying and then presenting
+    // Draw image is going to be copied to the swapchain image, so transition it to a transfer source layout
     image_transition(cmd, &renderer.draw_image, .TRANSFER_SRC_OPTIMAL)
     image_transition(cmd, renderer.swapchain.current_image, .TRANSFER_DST_OPTIMAL) // Swapchain image needs to be transitioned to a transfer destination layout
     image_copy(cmd, renderer.draw_image, renderer.swapchain.current_image^)
 
     gui_draw(renderer)
 
-	// Transition swapchain image to a presentation-ready layout
+    // Transition swapchain image to a presentation-ready layout
     image_transition(cmd, renderer.swapchain.current_image, .PRESENT_SRC_KHR)
 
     if vk.EndCommandBuffer(cmd) != .SUCCESS {
@@ -329,10 +335,12 @@ draw :: proc(renderer: ^Renderer) {
 
 resize_callback :: proc(renderer: ^Renderer) {
     if renderer.window.resized {
+        log.debug("Window Resized!")
         update_window_info(&renderer.window)
         swapchain_recreate(renderer)
         image_recreate(renderer, &renderer.draw_image, vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1 })
         image_recreate(renderer, &renderer.depth_image, vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1 })
+        renderer.window.resized = false // swapchain and draw images remade, resize was handled
     }
 }
 
@@ -472,7 +480,7 @@ get_queue_indices :: proc(renderer: ^Renderer) {
         }
 
         // Did we find all of our queues?
-		for q in renderer.queue_indices do if q == c.UINT32_MAX do continue;
+        for q in renderer.queue_indices do if q == c.UINT32_MAX do continue;
         break;
     }
 
