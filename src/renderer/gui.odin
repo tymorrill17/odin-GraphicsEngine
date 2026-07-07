@@ -2,9 +2,9 @@ package renderer
 
 import "core:log"
 import vk "vendor:vulkan"
-import "../../thirdparty/imgui"
-import "../../thirdparty/imgui/imgui_impl_glfw"
-import "../../thirdparty/imgui/imgui_impl_vulkan"
+import "thirdparty:imgui"
+import "thirdparty:imgui/imgui_impl_glfw"
+import "thirdparty:imgui/imgui_impl_vulkan"
 
 @(private="file")
 pool_sizes := []vk.DescriptorPoolSize{

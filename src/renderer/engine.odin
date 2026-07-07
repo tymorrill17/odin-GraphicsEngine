@@ -118,6 +118,7 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     glob_ctx = context // Save this for the debug messenger callback
 
     renderer.window = window_create(renderer_cfg.extent.x, renderer_cfg.extent.y, renderer_cfg.app_name)
+    //window_set_callbacks(renderer)
     instance_initialize(renderer, renderer_cfg.app_name, "OdinRenderer", renderer_cfg.validation_layers, []cstring{})
     // The window surface needs the instance to be created, so do it now
 
@@ -244,10 +245,7 @@ draw :: proc(renderer: ^Renderer) {
 
     frame_render_fence := renderer.frame_render_fence[frame_index]
     vk.WaitForFences(renderer.logical_device, 1, &frame_render_fence, true, TIMEOUT)
-<<<<<<< Updated upstream
-=======
 
->>>>>>> Stashed changes
     acquire_next_image(renderer)
     swapchain_image_index := renderer.swapchain.image_index
     renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[swapchain_image_index]
@@ -336,6 +334,7 @@ draw :: proc(renderer: ^Renderer) {
 resize_callback :: proc(renderer: ^Renderer) {
     if renderer.window.resized {
         log.debug("Window Resized!")
+        wait_idle(renderer)
         update_window_info(&renderer.window)
         swapchain_recreate(renderer)
         image_recreate(renderer, &renderer.draw_image, vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1 })

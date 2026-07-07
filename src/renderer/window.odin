@@ -101,12 +101,6 @@ update_window_info :: proc(window: ^Window) {
 }
 
 @(private)
-window_set_callbacks :: proc(renderer: ^Renderer) {
-    glfw.SetWindowUserPointer(renderer.window.glfw_window, renderer)
-    glfw.SetFramebufferSizeCallback(renderer.window.glfw_window, framebuffer_resize_callback)
-}
-
-@(private)
 get_required_vulkan_extensions :: proc(using_validation_layers: bool) -> [dynamic]cstring {
     extensions_cstr := glfw.GetRequiredInstanceExtensions()
     extensions := make([dynamic]cstring, 0, len(extensions_cstr))
@@ -124,6 +118,13 @@ surface_initialize :: proc(renderer: ^Renderer) {
     if glfw.CreateWindowSurface(renderer.instance, renderer.window.glfw_window, nil, &renderer.surface) != .SUCCESS {
         log.panic("Failed to create window surface!")
     }
+}
+
+// TODO: 07/03/2026 need to revisit and fix the resizing/set_fullscreen issues. Not important for now though
+@(private)
+window_set_callbacks :: proc(renderer: ^Renderer) {
+    glfw.SetWindowUserPointer(renderer.window.glfw_window, renderer)
+    glfw.SetFramebufferSizeCallback(renderer.window.glfw_window, framebuffer_resize_callback)
 }
 
 @(private)

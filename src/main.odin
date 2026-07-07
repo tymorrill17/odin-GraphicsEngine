@@ -1,7 +1,6 @@
 package main
 
-import "core:log"
-import "../thirdparty/imgui/"
+import "thirdparty:imgui"
 import "renderer"
 
 APPLICATION_WIDTH  :: 1280
