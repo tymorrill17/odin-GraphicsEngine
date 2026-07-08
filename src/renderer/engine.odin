@@ -122,6 +122,9 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     instance_initialize(renderer, renderer_cfg.app_name, "OdinRenderer", renderer_cfg.validation_layers, []cstring{})
     // The window surface needs the instance to be created, so do it now
 
+    // Collect and compile shaders
+    shaders_init()
+
     // Get the vulkan instance version
     glob_vk_lib.instance_api_version = vk.API_VERSION_1_0
     if vk.EnumerateInstanceVersion != nil {
@@ -216,6 +219,9 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
 
     // Instance cleanup
     vk.DestroyInstance(renderer.instance, nil)
+
+    // Cleanup Shaders
+    shaders_cleanup()
 
     // Window cleanup
     window_destroy(&renderer.window)

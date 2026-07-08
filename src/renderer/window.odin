@@ -1,5 +1,6 @@
 package renderer
 
+import "base:runtime"
 import "vendor:glfw"
 import "core:log"
 
@@ -124,11 +125,12 @@ surface_initialize :: proc(renderer: ^Renderer) {
 @(private)
 window_set_callbacks :: proc(renderer: ^Renderer) {
     glfw.SetWindowUserPointer(renderer.window.glfw_window, renderer)
-    glfw.SetFramebufferSizeCallback(renderer.window.glfw_window, framebuffer_resize_callback)
+    glfw.SetFramebufferSizeCallback(renderer.window.glfw_window, window_resize_callback)
+    glfw.SetWindowSizeCallback(renderer.window.glfw_window, window_resize_callback)
 }
 
 @(private)
-framebuffer_resize_callback :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
+window_resize_callback :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
     renderer := cast(^Renderer)glfw.GetWindowUserPointer(window)
     renderer.window.resized = true
 }

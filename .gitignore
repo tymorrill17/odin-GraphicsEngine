@@ -3,4 +3,4 @@ thirdparty/
 ols.json
 *.bin
 imgui.ini
-renderer
+run

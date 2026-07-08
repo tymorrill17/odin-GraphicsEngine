@@ -7,10 +7,11 @@ import json
 from pathlib import Path
 
 # Config
-EXE_NAME         = "renderer"       # name of the final executable (no extension)
-SRC_DIR          = "src"            # folder passed to `odin build`
-THIRDPARTY_DIR   = "thirdparty"     # folder containing git-cloned libraries
-EXTRA_BUILD_ARGS = []               # any extra flags you always want, e.g. ["-vet"]
+EXE_NAME            = "run"         # name of the final executable (no extension)
+SRC_DIR             = "src"         # folder passed to `odin build`
+THIRDPARTY_DIR      = "thirdparty"  # folder containing git-cloned libraries
+SHADER_DIR          = "shaders"     # folder containing all shader files
+EXTRA_BUILD_ARGS    = []            # any extra flags you always want, e.g. ["-vet"]
 
 
 PROJECT_DIR = Path(__file__).resolve().parent # Get the project root
@@ -26,6 +27,14 @@ args = parser.parse_args()
 exe_path = PROJECT_DIR / (EXE_NAME if platform.system() != "Windows" else EXE_NAME + ".exe")
 thirdparty_path = PROJECT_DIR / THIRDPARTY_DIR  # Add the THIRDPARTY_DIR to the project as a collection. This will let you
                                                 # import packages in THIRDPARTY_DIR as: import "thirdparty:{package_name}"
+
+match platform.system():
+    case "Windows":
+        os = "windows"
+    case "Linux":
+        os = "linux"
+    case _:
+        os = "darwin"
 
 # If cleaning, delete files and exit
 if args.clean:
@@ -43,14 +52,6 @@ if args.install_thirdparty:
 
 # Generate new ols.json
 if args.generate_ols_json:
-    match platform.system():
-        case "Windows":
-            os = "windows"
-        case "Linux":
-            os = "linux"
-        case _:
-            os = "darwin"
-
     ols_json = {
         "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
         "enable_semantic_tokens": False,
@@ -84,16 +85,20 @@ if args.debug:
     cmd += ["-debug"]
 else: # release mode
     cmd += ["-o:speed"]
+
+# Define constants here
+cmd += [f"-define:SHADER_DIR={SHADER_DIR}"]
+
 cmd += EXTRA_BUILD_ARGS
 
-print("Running:", " ".join(cmd))
+print(" ".join(cmd))
 result = subprocess.run(cmd, cwd=PROJECT_DIR)
 if result.returncode != 0:
     sys.exit(result.returncode)
-print(f"\nBuilt: {exe_path}")
+print(f"Built {exe_path}")
 
 # Run the code after building
 if args.run:
-    print(f"\nRunning {exe_path}...\n")
+    print(f"Running {exe_path}...\n")
     subprocess.run([str(exe_path)], cwd=PROJECT_DIR)
 
