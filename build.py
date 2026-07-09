@@ -27,6 +27,7 @@ args = parser.parse_args()
 exe_path = PROJECT_DIR / (EXE_NAME if platform.system() != "Windows" else EXE_NAME + ".exe")
 thirdparty_path = PROJECT_DIR / THIRDPARTY_DIR  # Add the THIRDPARTY_DIR to the project as a collection. This will let you
                                                 # import packages in THIRDPARTY_DIR as: import "thirdparty:{package_name}"
+shader_path = PROJECT_DIR / SHADER_DIR
 
 match platform.system():
     case "Windows":
@@ -87,7 +88,7 @@ else: # release mode
     cmd += ["-o:speed"]
 
 # Define constants here
-cmd += [f"-define:SHADER_DIR={SHADER_DIR}"]
+cmd += [f"-define:SHADER_DIR={shader_path}"]
 
 cmd += EXTRA_BUILD_ARGS
 
