@@ -1,6 +1,6 @@
 build/
+bin/*
 thirdparty/
 ols.json
-*.bin
 imgui.ini
 run

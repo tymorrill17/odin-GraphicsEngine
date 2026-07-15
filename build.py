@@ -8,10 +8,12 @@ from pathlib import Path
 
 # Config
 EXE_NAME            = "run"         # name of the final executable (no extension)
+BIN_DIR             = "bin"         # name of the final executable (no extension)
 SRC_DIR             = "src"         # folder passed to `odin build`
 THIRDPARTY_DIR      = "thirdparty"  # folder containing git-cloned libraries
 SHADER_DIR          = "shaders"     # folder containing all shader files
 EXTRA_BUILD_ARGS    = []            # any extra flags you always want, e.g. ["-vet"]
+EXTRA_LINKER_FLAGS  = "-lstdc++"    # input to odin's "extra-linker-flags" build arg
 
 
 PROJECT_DIR = Path(__file__).resolve().parent # Get the project root
@@ -24,26 +26,32 @@ parser.add_argument("--install-thirdparty", action="store_true", help="create th
 parser.add_argument("--generate-ols-json",  action="store_true", help="generate ols.json file using the ")
 args = parser.parse_args()
 
-exe_path = PROJECT_DIR / (EXE_NAME if platform.system() != "Windows" else EXE_NAME + ".exe")
-thirdparty_path = PROJECT_DIR / THIRDPARTY_DIR  # Add the THIRDPARTY_DIR to the project as a collection. This will let you
-                                                # import packages in THIRDPARTY_DIR as: import "thirdparty:{package_name}"
 shader_path = PROJECT_DIR / SHADER_DIR
+if not shader_path.exists():
+    shader_path.mkdir()
+
+bin_path = PROJECT_DIR / BIN_DIR
+exe_path = bin_path / (EXE_NAME if platform.system() != "Windows" else EXE_NAME + ".exe")
+if not bin_path.exists():
+    bin_path.mkdir()
+
+thirdparty_path = PROJECT_DIR / THIRDPARTY_DIR  # Add the THIRDPARTY_DIR to the project as a collection. This will let you
+if not thirdparty_path.exists():                         # import packages in THIRDPARTY_DIR as: import "thirdparty:{package_name}"
+    thirdparty_path.mkdir()
 
 match platform.system():
     case "Windows":
-        os = "windows"
+        os_name = "windows"
     case "Linux":
-        os = "linux"
+        os_name = "linux"
     case _:
-        os = "darwin"
+        os_name = "darwin"
 
 # If cleaning, delete files and exit
 if args.clean:
-    if exe_path.exists():
-        exe_path.unlink()
-        print(f"Removed {exe_path}.")
-    else:
-        print("Nothing to clean.")
+    for file in bin_path.iterdir():
+        file.unlink()
+        print(f"Removed {file}.")
     exit()
 
 # Install third-party dependencies
@@ -61,7 +69,7 @@ if args.generate_ols_json:
         "enable_snippets": True,
         "enable_auto_import": False,
         "profile": "default",
-        "profiles": [ { "name": "default", "os": os, "checker_path": ["src"], "defines": { "ODIN_DEBUG": ("true" if args.debug else "false") } } ],
+        "profiles": [ { "name": "default", "os": os_name, "checker_path": ["src"], "defines": { "ODIN_DEBUG": ("true" if args.debug else "false") } } ],
         "collections": [ { "name": "thirdparty", "path": str(thirdparty_path) } ]
     }
     with open(PROJECT_DIR / 'ols.json', 'w', encoding='utf-8') as file:
@@ -89,6 +97,9 @@ else: # release mode
 
 # Define constants here
 cmd += [f"-define:SHADER_DIR={shader_path}"]
+
+# Extra linker flags
+cmd += [f"-extra-linker-flags:{EXTRA_LINKER_FLAGS}"]
 
 cmd += EXTRA_BUILD_ARGS
 
