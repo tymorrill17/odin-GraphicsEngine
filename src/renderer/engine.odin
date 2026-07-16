@@ -70,7 +70,6 @@ Renderer :: struct {
     immediate_command:          vk.CommandBuffer,
     immediate_submit_fence:     vk.Fence,
     descriptor_builder:         DescriptorBuilder,
-    //shader_manager:           ShaderManager,
 
     frame_acquired_image_sem:   []vk.Semaphore, // Semaphore to let the GPU know the swapchain image has been acquired. One per frame
     frame_render_fence:         []vk.Fence, // Lets the GPU know that the CPU is done issuing rendering commands. One per frame
@@ -121,9 +120,6 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     //window_set_callbacks(renderer)
     instance_initialize(renderer, renderer_cfg.app_name, "OdinRenderer", renderer_cfg.validation_layers, []cstring{})
     // The window surface needs the instance to be created, so do it now
-
-    // Collect and compile shaders
-    shaders_init()
 
     // Get the vulkan instance version
     glob_vk_lib.instance_api_version = vk.API_VERSION_1_0
@@ -219,9 +215,6 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
 
     // Instance cleanup
     vk.DestroyInstance(renderer.instance, nil)
-
-    // Cleanup Shaders
-    shaders_cleanup()
 
     // Window cleanup
     window_destroy(&renderer.window)

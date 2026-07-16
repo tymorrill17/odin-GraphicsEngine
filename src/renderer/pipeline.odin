@@ -111,7 +111,7 @@ pipeline_cfg_build_pipeline :: proc(config: ^PipelineConfig, renderer: ^Renderer
     return Pipeline{ handle = pipeline_handle, layout = pipeline_layout }
 }
 
-pipeline_cfg_add_shader :: proc(config: ^PipelineConfig, shader: Shader, entry_point: cstring = "main") {
+pipeline_cfg_add_shader :: proc(config: ^PipelineConfig, shader: ShaderModule, entry_point: cstring = "main") {
     shader_stage_info := vk.PipelineShaderStageCreateInfo{
         sType   = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage   = shader.stage,
