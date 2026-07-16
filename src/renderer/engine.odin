@@ -69,7 +69,6 @@ Renderer :: struct {
     immediate_command_pool:     vk.CommandPool,
     immediate_command:          vk.CommandBuffer,
     immediate_submit_fence:     vk.Fence,
-    descriptor_builder:         DescriptorBuilder,
 
     frame_acquired_image_sem:   []vk.Semaphore, // Semaphore to let the GPU know the swapchain image has been acquired. One per frame
     frame_render_fence:         []vk.Fence, // Lets the GPU know that the CPU is done issuing rendering commands. One per frame
