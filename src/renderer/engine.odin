@@ -42,12 +42,20 @@ device_features_13 := vk.PhysicalDeviceVulkan13Features{ sType = .PHYSICAL_DEVIC
     dynamicRendering = true,
 }
 
+pool_size_ratios :: []PoolSizeRatio{
+    {vk.DescriptorType.UNIFORM_BUFFER,         100},
+    {vk.DescriptorType.UNIFORM_BUFFER_DYNAMIC, 100},
+    {vk.DescriptorType.STORAGE_BUFFER,         100},
+    {vk.DescriptorType.COMBINED_IMAGE_SAMPLER, 100},
+};
+
 RendererConfig :: struct {
-    app_name:           cstring,
-    extent:             int2,
-    validation_layers:  []cstring,
-    device_extensions:  []cstring,
-    use_discrete_GPU:   bool
+    app_name:                       cstring,
+    extent:                         int2,
+    validation_layers:              []cstring,
+    device_extensions:              []cstring,
+    use_discrete_GPU:               bool,
+    initial_descriptor_set_count:   uint,
 }
 
 Renderer :: struct {
@@ -69,6 +77,7 @@ Renderer :: struct {
     immediate_command_pool:     vk.CommandPool,
     immediate_command:          vk.CommandBuffer,
     immediate_submit_fence:     vk.Fence,
+    descriptor_allocator:       DescriptorAllocator, // Contains descriptor pools to allocate descriptor sets
 
     frame_acquired_image_sem:   []vk.Semaphore, // Semaphore to let the GPU know the swapchain image has been acquired. One per frame
     frame_render_fence:         []vk.Fence, // Lets the GPU know that the CPU is done issuing rendering commands. One per frame
@@ -161,6 +170,9 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     // inititalizes immediate_command_pool, immediate_command, and immediate_submit_fence
     immediate_command_initialize(renderer)
 
+    // initialize descriptor allocator
+    descriptor_allocator_initialize(renderer, renderer_cfg.initial_descriptor_set_count, pool_size_ratios)
+
     renderer.render_scale = 1
     renderer.frame_index  = 0
     renderer.frame_number = 0
@@ -178,6 +190,8 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
     wait_idle(renderer)
 
     gui_destroy(renderer)
+
+    descriptor_allocator_destroy(renderer)
 
     // immediate command cleanup
     fence_destroy(renderer, renderer.immediate_submit_fence)

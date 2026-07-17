@@ -18,11 +18,12 @@ requested_device_extensions : []cstring : {
 main :: proc() {
 
     renderer_config := renderer.RendererConfig{
-        app_name            = "Renderer",
-        extent              = {APPLICATION_WIDTH, APPLICATION_HEIGHT},
-        use_discrete_GPU    = true,
-        validation_layers   = requested_validation_layers,
-        device_extensions   = requested_device_extensions
+        app_name                        = "Renderer",
+        extent                          = {APPLICATION_WIDTH, APPLICATION_HEIGHT},
+        use_discrete_GPU                = true,
+        validation_layers               = requested_validation_layers,
+        device_extensions               = requested_device_extensions,
+        initial_descriptor_set_count    = 10,
     }
 
     r: renderer.Renderer
