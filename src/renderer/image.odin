@@ -8,7 +8,7 @@ import "core:log"
 Image :: struct {
     handle:         vk.Image,
     view:           vk.ImageView,
-    //sampler:        vk.Sampler, // only needed for images used as textures
+    sampler:        vk.Sampler, // only needed for images used as textures
     allocation:     vma.Allocation, // if nil, then the image has or needs no allocation
 
     layout:         vk.ImageLayout,

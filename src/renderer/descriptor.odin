@@ -2,6 +2,7 @@ package renderer
 
 import vk "vendor:vulkan"
 import "core:log"
+import "core:mem/virtual"
 
 MAX_SETS_PER_POOL :: 4096
 
@@ -12,49 +13,67 @@ PoolSizeRatio :: struct {
 
 // Descriptor Layout Builder
 
-DescriptorLayoutBuilder :: [dynamic]vk.DescriptorSetLayoutBinding
+DescriptorLayoutBuilder :: struct {
+    bindings:       [dynamic]vk.DescriptorSetLayoutBinding,
+    built_layouts:  [dynamic]vk.DescriptorSetLayout,
+}
 
 descriptor_layout_builder_create :: proc() -> DescriptorLayoutBuilder {
-    descriptor_layout_builder := make(DescriptorLayoutBuilder)
-    return descriptor_layout_builder
+    builder: DescriptorLayoutBuilder
+    builder.bindings        = make([dynamic]vk.DescriptorSetLayoutBinding)
+    builder.built_layouts   = make([dynamic]vk.DescriptorSetLayout)
+    return builder
 }
 
-descriptor_layout_builder_destroy :: proc(descriptor_layout_builder: ^DescriptorLayoutBuilder) {
-    delete(descriptor_layout_builder^)
-    descriptor_layout_builder^ = nil
+// Destroy DescriptorLayoutBuilder, freeing associated memory. NOTE: destroying the builder does not destroy
+// the built layouts; you'll have to call that separately
+descriptor_layout_builder_destroy :: proc(builder: ^DescriptorLayoutBuilder) {
+    delete(builder.bindings)
+    delete(builder.built_layouts)
+    builder^ = {}
 }
 
-descriptor_layout_builder_add_binding :: proc(descriptor_layout_builder: ^[dynamic]vk.DescriptorSetLayoutBinding, binding: u32, descriptor_type: vk.DescriptorType, shader_stage: vk.ShaderStageFlags) {
+// Destroy all descriptor set layouts built by the builder.
+descriptor_layout_builder_destroy_built_layouts :: proc(builder: ^DescriptorLayoutBuilder, renderer: ^Renderer) {
+    for layout in builder.built_layouts {
+        vk.DestroyDescriptorSetLayout(renderer.logical_device, layout, nil)
+    }
+    clear(&builder.built_layouts)
+}
+
+descriptor_layout_builder_add_binding :: proc(builder: ^DescriptorLayoutBuilder,
+    binding: u32, descriptor_type: vk.DescriptorType, descriptor_count: uint, shader_stage: vk.ShaderStageFlags) {
+
     new_binding := vk.DescriptorSetLayoutBinding{
 		binding         = binding,
 		descriptorType  = descriptor_type,
-		descriptorCount = 1,
+		descriptorCount = u32(descriptor_count), // How many descriptors of the same type in this binding (used for bindless)
 		stageFlags      = shader_stage
 	}
 
-    append(descriptor_layout_builder, new_binding)
+    append(&builder.bindings, new_binding)
 }
 
-descriptor_layout_builder_build :: proc(descriptor_layout_builder: ^[dynamic]vk.DescriptorSetLayoutBinding, renderer: ^Renderer) -> vk.DescriptorSetLayout {
+descriptor_layout_builder_build :: proc(builder: ^DescriptorLayoutBuilder, renderer: ^Renderer) -> vk.DescriptorSetLayout {
     set_layout: vk.DescriptorSetLayout
 
 	descriptor_set_layout_info := vk.DescriptorSetLayoutCreateInfo{
 		sType           = vk.StructureType.DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 		pNext           = nil,
 		flags           = { },
-		bindingCount    = cast(u32)len(descriptor_layout_builder),
-		pBindings       = raw_data(descriptor_layout_builder[:]),
+		bindingCount    = cast(u32)len(builder.bindings),
+		pBindings       = raw_data(builder.bindings[:]),
 	};
 
     if vk.CreateDescriptorSetLayout(renderer.logical_device, &descriptor_set_layout_info, nil, &set_layout) != .SUCCESS {
         log.panic("Failed to create descriptor set layout!")
     }
-
+    clear(&builder.bindings) // Clear bindings for next build
+    append(&builder.built_layouts, set_layout) // Store the new layout in the destruction arena
     return set_layout
 }
 
 // Descriptor Allocator
-
 
 // TODO: consider having a global descriptor pool and a per-frame one?
 // Dynamic descriptor pool management structure
@@ -133,9 +152,7 @@ descriptor_allocator_expand_open_pools :: proc(renderer: ^Renderer, set_count: u
     append(&renderer.descriptor_allocator.open_pools, pool)
 }
 
-@(private)
-descriptor_allocator_allocate_set :: proc(renderer: ^Renderer, layouts: []vk.DescriptorSetLayout) -> vk.DescriptorSet {
-
+descriptor_set_create :: proc(renderer: ^Renderer, layouts: []vk.DescriptorSetLayout) -> vk.DescriptorSet {
     get_open_pool :: proc(renderer: ^Renderer) -> vk.DescriptorPool {
         if len(renderer.descriptor_allocator.open_pools) == 0 { // There are no open pools, need to make one
             descriptor_allocator_expand_open_pools(renderer, renderer.descriptor_allocator.sets_per_pool, renderer.descriptor_allocator.pool_size_ratios[:])
@@ -174,7 +191,77 @@ descriptor_allocator_allocate_set :: proc(renderer: ^Renderer, layouts: []vk.Des
     return new_set
 }
 
+// Descriptor Writer
 
+DescriptorWriter :: struct {
+    writes: [dynamic]vk.WriteDescriptorSet,
+    arena:  virtual.Arena,
+}
 
+descriptor_writer_create :: proc() -> DescriptorWriter {
+    writer: DescriptorWriter
+    writer.writes = make([dynamic]vk.WriteDescriptorSet)
+    err := virtual.arena_init_growing(&writer.arena)
+    assert(err != nil)
+    return writer
+}
 
+descriptor_writer_destroy :: proc(writer: ^DescriptorWriter) {
+    delete(writer.writes)
+    virtual.arena_destroy(&writer.arena)
+    writer^ = {}
+}
 
+descriptor_writer_add_images :: proc(writer: ^DescriptorWriter, set: vk.DescriptorSet, binding: uint, images: []Image, type: vk.DescriptorType, set_index: uint = 0) {
+    writer_allocator := virtual.arena_allocator(&writer.arena)
+    image_infos := make([]vk.DescriptorImageInfo, len(images), writer_allocator)
+    for image, i in images {
+        image_infos[i] = vk.DescriptorImageInfo{
+            sampler     = image.sampler,
+            imageView   = image.view,
+            imageLayout = image.layout,
+        }
+    }
+
+    write := vk.WriteDescriptorSet{
+        sType           = vk.StructureType.WRITE_DESCRIPTOR_SET,
+        dstSet          = set,
+        dstBinding      = u32(binding),
+        dstArrayElement = u32(set_index),
+        descriptorCount = u32(len(images)),
+        descriptorType  = type,
+        pImageInfo      = raw_data(image_infos),
+    }
+
+    append(&writer.writes, write)
+}
+
+descriptor_writer_add_buffers :: proc(writer: ^DescriptorWriter, set: vk.DescriptorSet, binding: uint, buffers: []Buffer, type: vk.DescriptorType, offset: u64 = 0, size: u64 = vk.WHOLE_SIZE, set_index: uint = 0) {
+    writer_allocator := virtual.arena_allocator(&writer.arena)
+    buffer_infos := make([]vk.DescriptorBufferInfo, len(buffers), writer_allocator)
+    for buffer, i in buffers {
+        buffer_infos[i] = vk.DescriptorBufferInfo{
+            buffer = buffer.handle,
+            offset = vk.DeviceSize(offset),
+            range  = vk.DeviceSize(size),
+        }
+    }
+
+    write := vk.WriteDescriptorSet{
+        sType           = vk.StructureType.WRITE_DESCRIPTOR_SET,
+        dstSet          = set,
+        dstBinding      = u32(binding),
+        dstArrayElement = u32(set_index),
+        descriptorCount = u32(len(buffers)),
+        descriptorType  = type,
+        pBufferInfo     = raw_data(buffer_infos),
+    }
+
+    append(&writer.writes, write)
+}
+
+descriptor_writer_update_sets :: proc(writer: ^DescriptorWriter, renderer: ^Renderer) {
+    vk.UpdateDescriptorSets(renderer.logical_device, u32(len(writer.writes)), raw_data(writer.writes), 0, nil)
+    virtual.arena_free_all(&writer.arena)
+    clear(&writer.writes)
+}
