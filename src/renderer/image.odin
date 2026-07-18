@@ -78,7 +78,7 @@ image_create :: proc(renderer: ^Renderer, extent: vk.Extent3D, format: vk.Format
 image_recreate :: proc(renderer: ^Renderer, image: ^Image, extent: vk.Extent3D) {
     use_mipmaps: bool = image.mip_levels > 1
     image_destroy(renderer, image)
-    image_create(renderer, extent, image.format, image.usage_flags, use_mipmaps)
+    image^ = image_create(renderer, extent, image.format, image.usage_flags, use_mipmaps)
     image.layout = .UNDEFINED
 }
 

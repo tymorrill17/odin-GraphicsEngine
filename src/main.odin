@@ -2,6 +2,7 @@ package main
 
 import "thirdparty:imgui"
 import "renderer"
+import "core:log"
 
 APPLICATION_WIDTH  :: 1280
 APPLICATION_HEIGHT :: 720
@@ -16,6 +17,10 @@ requested_device_extensions : []cstring : {
 }
 
 main :: proc() {
+
+    // Initialize logger to output to console
+    logger := log.create_console_logger()
+    context.logger = logger
 
     renderer_config := renderer.RendererConfig{
         app_name                        = "Renderer",
