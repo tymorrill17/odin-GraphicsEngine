@@ -202,7 +202,7 @@ descriptor_writer_create :: proc() -> DescriptorWriter {
     writer: DescriptorWriter
     writer.writes = make([dynamic]vk.WriteDescriptorSet)
     err := virtual.arena_init_growing(&writer.arena)
-    assert(err != nil)
+    assert(err == nil)
     return writer
 }
 

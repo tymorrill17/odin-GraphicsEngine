@@ -16,8 +16,7 @@ struct MeshVertex {
 //};
 
 struct GlobalBuffer {
-    float4x4 projection;
-    float4x4 view;
+    float4x4 viewproj;
     float4x4 model;
 };
 
@@ -45,7 +44,7 @@ VSOutput vertex_main(VSInput input) {
     // Get the vertex data from the device address
     // MeshVertex vertex = vertex_push_constants.vertex_address[input.vertex_index];
 
-    output.position = mul(global_buffer.projection, mul(global_buffer.view, mul(global_buffer.model, float4(input.vertex.position, 1.0f))));
+    output.position = mul(global_buffer.viewproj, mul(global_buffer.model, float4(input.vertex.position, 1.0f)));
     output.color = input.vertex.color;;
     output.uv.x = input.vertex.uv_x;
     output.uv.y = input.vertex.uv_y;
