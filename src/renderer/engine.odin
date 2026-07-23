@@ -6,6 +6,7 @@ import "core:log"
 import "core:c"
 import "core:math"
 import "core:strings"
+import "core:slice"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 import vma "../../thirdparty/vma"
@@ -49,6 +50,12 @@ pool_size_ratios :: []PoolSizeRatio{
     {vk.DescriptorType.COMBINED_IMAGE_SAMPLER, 100},
 };
 
+DrawPushConstants :: struct {
+    world_matrix:       matrix[4,4]f32,
+    vertex_buffer_addr: vk.DeviceAddress,
+    index_buffer_addr:  vk.DeviceAddress,
+}
+
 RendererConfig :: struct {
     app_name:                       cstring,
     extent:                         int2,
@@ -88,6 +95,9 @@ Renderer :: struct {
     current_acquired_image_sem: ^vk.Semaphore,
     current_render_fence:       ^vk.Fence,
     current_swpch_render_sem:   ^vk.Semaphore,
+
+    renderables:                [dynamic]RenderObject,
+    scene_descriptors:          [dynamic]vk.DescriptorSet,
 
     frame_number:               u64,
     frame_index:                u32,
@@ -170,6 +180,9 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     // initialize descriptor allocator
     descriptor_allocator_initialize(renderer, renderer_cfg.initial_descriptor_set_count, pool_size_ratios)
 
+    renderer.renderables = make([dynamic]RenderObject)
+    renderer.scene_descriptors = make([dynamic]vk.DescriptorSet)
+
     renderer.render_scale = 1
     renderer.frame_index  = 0
     renderer.frame_number = 0
@@ -187,6 +200,9 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
     wait_idle(renderer)
 
     gui_destroy(renderer)
+
+    delete(renderer.scene_descriptors)
+    delete(renderer.renderables)
 
     descriptor_allocator_destroy(renderer)
 
@@ -305,7 +321,39 @@ draw :: proc(renderer: ^Renderer) {
     vk.CmdSetViewport(cmd, 0, 1, &viewport)
     vk.CmdSetScissor(cmd, 0, 1, &scissor)
 
-    // Render commands go here
+    // Sort render objects so minimize pipeline and descriptor rebinds
+    // TODO: make this more robust
+    slice.sort_by(renderer.renderables[:], proc(a, b: RenderObject) -> bool {
+        if a.material == b.material do return a.index_buffer < b.index_buffer
+        return a.material < b.material
+    })
+
+    last_pipeline: ^Pipeline
+    last_material: ^MaterialInstance
+    for render_object in renderer.renderables {
+        if render_object.material.pipeline != last_pipeline {
+            // Then we need to bind the new pipeline
+            vk.CmdBindPipeline(cmd, .GRAPHICS, render_object.material.pipeline.handle)
+            vk.CmdBindDescriptorSets(cmd, .GRAPHICS, render_object.material.pipeline.layout,
+                0, u32(len(renderer.scene_descriptors)), raw_data(renderer.scene_descriptors), 0, nil)
+            last_pipeline = render_object.material.pipeline
+        }
+        if render_object.material != last_material {
+            // Then we need to bind the new material descriptors
+            vk.CmdBindDescriptorSets(cmd, .GRAPHICS, render_object.material.pipeline.layout,
+                0, 1, &render_object.material.descriptor, 0, nil)
+            last_material = render_object.material
+        }
+
+        vk.CmdBindIndexBuffer(cmd, render_object.index_buffer, 0, .UINT32)
+        push_constants := DrawPushConstants{
+            world_matrix = render_object.transform,
+            vertex_buffer_addr = render_object.vertex_buffer_addr,
+            index_buffer_addr = render_object.instance_buffer_addr,
+        }
+        vk.CmdPushConstants(cmd, render_object.material.pipeline.layout, { .VERTEX }, 0, size_of(push_constants), &push_constants)
+        vk.CmdDrawIndexed(cmd, render_object.index_count, render_object.instance_count, render_object.first_index, 0, 0)
+    }
 
     vk.CmdEndRendering(cmd)
 

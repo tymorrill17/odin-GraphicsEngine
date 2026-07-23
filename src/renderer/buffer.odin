@@ -8,7 +8,7 @@ import "core:mem"
 Buffer :: struct {
     handle:         vk.Buffer,
     allocation:     vma.Allocation,
-    data:           rawptr,
+    data_ptr:       rawptr,
 
     total_bytes:    u64, // How many bytes IN TOTAL (including all instances)
     instance_bytes: u64, // How many bytes one instance uses
@@ -68,7 +68,7 @@ buffer_destroy :: proc(renderer: ^Renderer, buffer: ^Buffer) {
 }
 
 buffer_map :: proc(renderer: ^Renderer, buffer: ^Buffer) {
-    if vma.MapMemory(renderer.allocator, buffer.allocation, &buffer.data) != .SUCCESS {
+    if vma.MapMemory(renderer.allocator, buffer.allocation, &buffer.data_ptr) != .SUCCESS {
         log.panic("Failed to map memory to buffer!")
     }
 }
@@ -81,9 +81,9 @@ buffer_write_data :: proc(renderer: ^Renderer, buffer: ^Buffer,
     data: rawptr, size: u64 = vk.WHOLE_SIZE, offset: u64 = 0) {
 
     if size == vk.WHOLE_SIZE {
-        mem.copy_non_overlapping(buffer.data, data, int(buffer.total_bytes))
+        mem.copy_non_overlapping(buffer.data_ptr, data, int(buffer.total_bytes))
     } else {
-        offset_data := ([^]u8)(buffer.data)
+        offset_data := ([^]u8)(buffer.data_ptr)
         mem.copy_non_overlapping(&offset_data[offset], data, int(size))
     }
 }

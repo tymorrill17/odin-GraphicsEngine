@@ -2,7 +2,6 @@ package main
 
 import "thirdparty:imgui"
 import vk "vendor:vulkan"
-import "thirdparty:vma"
 import "renderer"
 import "core:log"
 
@@ -63,11 +62,21 @@ main :: proc() {
     defer renderer.descriptor_layout_builder_destroy_built_layouts(&layout_builder, &r)
 
     renderer.descriptor_layout_builder_add_binding(&layout_builder, 0, .UNIFORM_BUFFER, 1, { .VERTEX })
-    global_uniform_layout := renderer.descriptor_layout_builder_build(&layout_builder, &r)
+    global_scene_layout := renderer.descriptor_layout_builder_build(&layout_builder, &r)
 
-    global_uniform_descriptor := renderer.descriptor_set_create(&r, { global_uniform_layout })
+    append(&r.scene_descriptors, renderer.descriptor_set_create(&r, { global_scene_layout }))
     descriptor_writer := renderer.descriptor_writer_create()
     defer renderer.descriptor_writer_destroy(&descriptor_writer)
+
+    particle_mesh := renderer.mesh_create_rectangle(&r, 1, 1)
+    // TODO: Create Material
+    // TODO: Write vertex and fragment shader for particle system rendering
+    fluid_material: ^renderer.MaterialInstance // = get_fluid_material()
+    n_particles: u32 = 1000
+
+    fluid_particle_system := renderer.particle_system_create(&r, n_particles, (0), particle_mesh, fluid_material)
+    defer renderer.particle_system_destroy(&fluid_particle_system, &r)
+    append(&r.renderables, renderer.particle_system_get_render_object(&fluid_particle_system, &r))
 
     camera_config := CameraParams{
         position    = (0),
@@ -88,8 +97,10 @@ main :: proc() {
         imgui.DragFloat("Orthographic Scale", &camera_config.scale, 0.1);
 		imgui.End();
 
+        // TODO: Fill model and viewproj matrices
+
         // Write to uniform buffer
-        renderer.descriptor_writer_add_buffers(&descriptor_writer, global_uniform_descriptor, 0, { global_uniform_buffer }, .UNIFORM_BUFFER)
+        renderer.descriptor_writer_add_buffers(&descriptor_writer, r.scene_descriptors[0], 0, { global_uniform_buffer }, .UNIFORM_BUFFER)
         renderer.descriptor_writer_update_sets(&descriptor_writer, &r)
 
         renderer.draw(&r)
