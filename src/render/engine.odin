@@ -1,4 +1,4 @@
-package renderer
+package render
 
 import "core:dynlib"
 import "base:runtime"

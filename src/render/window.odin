@@ -1,6 +1,5 @@
-package renderer
+package render
 
-import "base:runtime"
 import "vendor:glfw"
 import "core:log"
 

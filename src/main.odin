@@ -2,7 +2,7 @@ package main
 
 import "thirdparty:imgui"
 import vk "vendor:vulkan"
-import "renderer"
+import "render"
 import "core:log"
 
 APPLICATION_WIDTH  :: 1280
@@ -29,6 +29,10 @@ CameraData :: struct {
     viewproj:   matrix[4, 4]f32,
     model:      matrix[4, 4]f32,
 };
+
+get_fluid_material :: proc(renderer: ^renderer.Renderer) {
+
+}
 
 main :: proc() {
 

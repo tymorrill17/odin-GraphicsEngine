@@ -1,4 +1,4 @@
-package renderer
+package render
 
 // Miscellaneous types used throughout the rendering code
 
