@@ -8,12 +8,6 @@ import "core:path/filepath"
 SHADER_DIR      :: #config(SHADER_DIR, ".")
 SHADER_BIN_DIR  :: #config(SHADER_BIN_DIR, ".")
 
-ShaderModule :: struct {
-    module: vk.ShaderModule,
-    stage:  vk.ShaderStageFlags,
-}
-
-@(private)
 shader_module_create_from_file :: proc(renderer: ^Renderer, filename: string) -> vk.ShaderModule {
     shader_path, _ := filepath.join({SHADER_BIN_DIR, filename}, context.temp_allocator)
     code, read_err := os.read_entire_file(shader_path, context.temp_allocator)
@@ -40,7 +34,6 @@ shader_module_create_from_file :: proc(renderer: ^Renderer, filename: string) ->
     return shader_module
 }
 
-@(private)
 shader_module_destroy :: proc(renderer: ^Renderer, shader_module: vk.ShaderModule) {
     vk.DestroyShaderModule(renderer.logical_device, shader_module, nil)
 }

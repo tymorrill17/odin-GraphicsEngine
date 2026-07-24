@@ -98,6 +98,7 @@ Renderer :: struct {
 
     renderables:                [dynamic]RenderObject,
     scene_descriptors:          [dynamic]vk.DescriptorSet,
+    scene_descriptor_layouts:   [dynamic]vk.DescriptorSetLayout,
 
     frame_number:               u64,
     frame_index:                u32,
@@ -182,6 +183,7 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
 
     renderer.renderables = make([dynamic]RenderObject)
     renderer.scene_descriptors = make([dynamic]vk.DescriptorSet)
+    renderer.scene_descriptor_layouts = make([dynamic]vk.DescriptorSetLayout)
 
     renderer.render_scale = 1
     renderer.frame_index  = 0
@@ -201,6 +203,7 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
 
     gui_destroy(renderer)
 
+    delete(renderer.scene_descriptor_layouts)
     delete(renderer.scene_descriptors)
     delete(renderer.renderables)
 
@@ -328,7 +331,7 @@ draw :: proc(renderer: ^Renderer) {
         return a.material < b.material
     })
 
-    last_pipeline: ^Pipeline
+    last_pipeline: Pipeline
     last_material: ^MaterialInstance
     for render_object in renderer.renderables {
         if render_object.material.pipeline != last_pipeline {

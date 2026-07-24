@@ -15,6 +15,7 @@ pool_sizes := []vk.DescriptorPoolSize{
 @(private="file")
 gui_descriptor_pool: vk.DescriptorPool
 
+@(private)
 gui_initialize :: proc(renderer: ^Renderer) {
 
 	// Initialize core structures of ImGui
@@ -71,6 +72,7 @@ gui_initialize :: proc(renderer: ^Renderer) {
     imgui_impl_vulkan.Init(&vulkan_init)
 }
 
+@(private)
 gui_destroy :: proc(renderer: ^Renderer) {
     imgui_impl_vulkan.Shutdown()
     imgui_impl_glfw.Shutdown()
@@ -78,12 +80,14 @@ gui_destroy :: proc(renderer: ^Renderer) {
     vk.DestroyDescriptorPool(renderer.logical_device, gui_descriptor_pool, nil)
 }
 
+@(private)
 gui_start_frame :: proc() {
     imgui_impl_vulkan.NewFrame()
     imgui_impl_glfw.NewFrame()
     imgui.NewFrame()
 }
 
+@(private)
 gui_draw :: proc(renderer: ^Renderer) {
     cmd := renderer.current_command^ // Get the current frame's command buffer
 

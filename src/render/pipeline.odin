@@ -29,8 +29,18 @@ PipelineConfig :: struct {
     vertex_attribute_descriptions:  [dynamic]vk.VertexInputAttributeDescription,
 }
 
+pipeline_cfg_create :: proc() -> PipelineConfig {
+    cfg: PipelineConfig
+    cfg.shader_modules                  = make([dynamic]vk.PipelineShaderStageCreateInfo)
+    cfg.descriptor_layouts              = make([dynamic]vk.DescriptorSetLayout)
+    cfg.push_constant_ranges            = make([dynamic]vk.PushConstantRange)
+    cfg.vertex_binding_descriptions     = make([dynamic]vk.VertexInputBindingDescription)
+    cfg.vertex_attribute_descriptions   = make([dynamic]vk.VertexInputAttributeDescription)
+    return cfg
+}
+
 // Clean up the dynamic arrays in the PipelineConfig
-pipeline_cfg_delete :: proc(config: ^PipelineConfig) {
+pipeline_cfg_destroy :: proc(config: ^PipelineConfig) {
     delete(config.shader_modules)
     delete(config.descriptor_layouts)
     delete(config.push_constant_ranges)
@@ -111,11 +121,11 @@ pipeline_cfg_build_pipeline :: proc(config: ^PipelineConfig, renderer: ^Renderer
     return Pipeline{ handle = pipeline_handle, layout = pipeline_layout }
 }
 
-pipeline_cfg_add_shader :: proc(config: ^PipelineConfig, shader: ShaderModule, entry_point: cstring = "main") {
+pipeline_cfg_add_shader :: proc(config: ^PipelineConfig, shader: vk.ShaderModule, shader_stage: vk.ShaderStageFlags, entry_point: cstring = "main") {
     shader_stage_info := vk.PipelineShaderStageCreateInfo{
         sType   = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage   = shader.stage,
-        module  = shader.module,
+        stage   = shader_stage,
+        module  = shader,
         pName   = entry_point,
     }
     append(&config.shader_modules, shader_stage_info)
@@ -203,8 +213,7 @@ pipeline_cfg_add_vertex_attribute_desc :: proc(config: ^PipelineConfig, attribut
     append(&config.vertex_attribute_descriptions, attribute_desc)
 }
 
-create_pipeline_layout :: proc(renderer: ^Renderer,
-    descriptor_layouts: []vk.DescriptorSetLayout,
+create_pipeline_layout :: proc(renderer: ^Renderer, descriptor_layouts: []vk.DescriptorSetLayout,
     push_constant_ranges: []vk.PushConstantRange) -> vk.PipelineLayout {
     pipeline_layout_info := vk.PipelineLayoutCreateInfo{
         sType                   = .PIPELINE_LAYOUT_CREATE_INFO,

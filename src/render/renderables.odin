@@ -8,7 +8,7 @@ MaterialPass :: enum {
 }
 
 MaterialInstance :: struct {
-    pipeline:   ^Pipeline,
+    pipeline:   Pipeline,
     descriptor: vk.DescriptorSet,
     pass_type:  MaterialPass
 }
