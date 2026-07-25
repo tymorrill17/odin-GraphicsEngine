@@ -36,6 +36,7 @@ pipeline_cfg_create :: proc() -> PipelineConfig {
     cfg.push_constant_ranges            = make([dynamic]vk.PushConstantRange)
     cfg.vertex_binding_descriptions     = make([dynamic]vk.VertexInputBindingDescription)
     cfg.vertex_attribute_descriptions   = make([dynamic]vk.VertexInputAttributeDescription)
+    pipeline_cfg_clear(&cfg)
     return cfg
 }
 
@@ -61,64 +62,6 @@ pipeline_cfg_clear :: proc(config: ^PipelineConfig) {
     clear(&config.push_constant_ranges)
     clear(&config.vertex_binding_descriptions)
     clear(&config.vertex_attribute_descriptions)
-}
-
-pipeline_cfg_build_pipeline :: proc(config: ^PipelineConfig, renderer: ^Renderer) -> Pipeline {
-    vertex_input_state := vk.PipelineVertexInputStateCreateInfo{
-        sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        vertexBindingDescriptionCount   = u32(len(config.vertex_binding_descriptions)),
-        pVertexBindingDescriptions      = raw_data(config.vertex_binding_descriptions),
-        vertexAttributeDescriptionCount = u32(len(config.vertex_attribute_descriptions)),
-        pVertexAttributeDescriptions    = raw_data(config.vertex_attribute_descriptions),
-    }
-
-    viewport_state := vk.PipelineViewportStateCreateInfo{
-        sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        viewportCount   = 1,
-        scissorCount    = 1,
-    }
-
-    // Set up dummy color blending until we use transparent objects
-    color_blending_state := vk.PipelineColorBlendStateCreateInfo{
-        sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        logicOpEnable   = false,
-        logicOp         = vk.LogicOp.COPY,
-        attachmentCount = 1,
-        pAttachments    = &config.color_blend_attachment,
-    }
-
-    states: []vk.DynamicState = { vk.DynamicState.VIEWPORT, vk.DynamicState.SCISSOR }
-    dynamic_state := vk.PipelineDynamicStateCreateInfo{
-        sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        dynamicStateCount   = u32(len(states)),
-        pDynamicStates      = raw_data(states),
-    }
-
-    pipeline_layout := create_pipeline_layout(renderer, config.descriptor_layouts[:], config.push_constant_ranges[:])
-
-    pipeline_info := vk.GraphicsPipelineCreateInfo{
-        sType = .GRAPHICS_PIPELINE_CREATE_INFO,
-        pNext               = &config.rendering_info,
-        stageCount          = u32(len(config.shader_modules)),
-        pStages             = raw_data(config.shader_modules),
-        pVertexInputState   = &vertex_input_state,
-        pInputAssemblyState = &config.input_assembly,
-        pViewportState      = &viewport_state,
-        pRasterizationState = &config.rasterizer,
-        pMultisampleState   = &config.multisampling,
-        pDepthStencilState  = &config.depth_stencil,
-        pColorBlendState    = &color_blending_state,
-        pDynamicState       = &dynamic_state,
-        layout              = pipeline_layout,
-        renderPass          = NULL_HANDLE
-    }
-
-    pipeline_handle: vk.Pipeline
-    if vk.CreateGraphicsPipelines(renderer.logical_device, NULL_HANDLE, 1, &pipeline_info, nil, &pipeline_handle) != .SUCCESS {
-        log.panic("Failed to create pipeline!")
-    }
-
-    return Pipeline{ handle = pipeline_handle, layout = pipeline_layout }
 }
 
 pipeline_cfg_add_shader :: proc(config: ^PipelineConfig, shader: vk.ShaderModule, shader_stage: vk.ShaderStageFlags, entry_point: cstring = "main") {
@@ -213,7 +156,80 @@ pipeline_cfg_add_vertex_attribute_desc :: proc(config: ^PipelineConfig, attribut
     append(&config.vertex_attribute_descriptions, attribute_desc)
 }
 
-create_pipeline_layout :: proc(renderer: ^Renderer, descriptor_layouts: []vk.DescriptorSetLayout,
+pipeline_cfg_add_push_constant_range :: proc(config: ^PipelineConfig, shader_stages: vk.ShaderStageFlags, size: u32, offset: u32 = 0) {
+    append(&config.push_constant_ranges, vk.PushConstantRange{
+        stageFlags  = shader_stages,
+        offset      = offset,
+        size        = size,
+    })
+}
+
+pipeline_cfg_build_pipeline :: proc(config: ^PipelineConfig, renderer: ^Renderer) -> Pipeline {
+    vertex_input_state := vk.PipelineVertexInputStateCreateInfo{
+        sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        vertexBindingDescriptionCount   = u32(len(config.vertex_binding_descriptions)),
+        pVertexBindingDescriptions      = raw_data(config.vertex_binding_descriptions),
+        vertexAttributeDescriptionCount = u32(len(config.vertex_attribute_descriptions)),
+        pVertexAttributeDescriptions    = raw_data(config.vertex_attribute_descriptions),
+    }
+
+    viewport_state := vk.PipelineViewportStateCreateInfo{
+        sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        viewportCount   = 1,
+        scissorCount    = 1,
+    }
+
+    // Set up dummy color blending until we use transparent objects
+    color_blending_state := vk.PipelineColorBlendStateCreateInfo{
+        sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        logicOpEnable   = false,
+        logicOp         = vk.LogicOp.COPY,
+        attachmentCount = 1,
+        pAttachments    = &config.color_blend_attachment,
+    }
+
+    states: []vk.DynamicState = { vk.DynamicState.VIEWPORT, vk.DynamicState.SCISSOR }
+    dynamic_state := vk.PipelineDynamicStateCreateInfo{
+        sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        dynamicStateCount   = u32(len(states)),
+        pDynamicStates      = raw_data(states),
+    }
+
+    pipeline_layout := pipeline_layout_create(renderer, config.descriptor_layouts[:], config.push_constant_ranges[:])
+
+    pipeline_info := vk.GraphicsPipelineCreateInfo{
+        sType = .GRAPHICS_PIPELINE_CREATE_INFO,
+        pNext               = &config.rendering_info,
+        stageCount          = u32(len(config.shader_modules)),
+        pStages             = raw_data(config.shader_modules),
+        pVertexInputState   = &vertex_input_state,
+        pInputAssemblyState = &config.input_assembly,
+        pViewportState      = &viewport_state,
+        pRasterizationState = &config.rasterizer,
+        pMultisampleState   = &config.multisampling,
+        pDepthStencilState  = &config.depth_stencil,
+        pColorBlendState    = &color_blending_state,
+        pDynamicState       = &dynamic_state,
+        layout              = pipeline_layout,
+        renderPass          = NULL_HANDLE
+    }
+
+    pipeline_handle: vk.Pipeline
+    if vk.CreateGraphicsPipelines(renderer.logical_device, NULL_HANDLE, 1, &pipeline_info, nil, &pipeline_handle) != .SUCCESS {
+        log.panic("Failed to create pipeline!")
+    }
+
+    return Pipeline{ handle = pipeline_handle, layout = pipeline_layout }
+}
+
+pipeline_destroy :: proc(renderer: ^Renderer, pipeline: ^Pipeline) {
+    vk.DestroyPipeline(renderer.logical_device, pipeline.handle, nil)
+    vk.DestroyPipelineLayout(renderer.logical_device, pipeline.layout, nil)
+    pipeline^ = {}
+}
+
+@(private="file")
+pipeline_layout_create :: proc(renderer: ^Renderer, descriptor_layouts: []vk.DescriptorSetLayout,
     push_constant_ranges: []vk.PushConstantRange) -> vk.PipelineLayout {
     pipeline_layout_info := vk.PipelineLayoutCreateInfo{
         sType                   = .PIPELINE_LAYOUT_CREATE_INFO,

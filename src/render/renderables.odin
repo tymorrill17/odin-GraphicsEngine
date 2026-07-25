@@ -16,12 +16,12 @@ MaterialInstance :: struct {
 RenderObject :: struct {
     index_count:            u32,
     first_index:            u32,
-    index_buffer:           vk.Buffer, // Don't need the full Buffer object, vk handle suffices
+    index_buffer:           vk.Buffer, // index buffer for the mesh
     material:               ^MaterialInstance,
     transform:              matrix[4,4]f32,
     vertex_buffer_addr:     vk.DeviceAddress,
-    instance_buffer_addr:   vk.DeviceAddress,
-    instance_count:         u32,
+    instance_buffer_addr:   ^vk.DeviceAddress, // If we are rendering multiple instances of this object, store the positions here
+    instance_count:         u32,              // How many instances are we rendering?
 }
 
 MeshBuffers :: struct {
@@ -49,6 +49,7 @@ MeshVertex :: struct {
 };
 
 // Send vertex and index data to the GPU by creating buffers and writing to them. Returns the created buffers.
+@(private)
 mesh_upload_to_GPU :: proc(renderer: ^Renderer, vertices: []MeshVertex, indices: []u32) -> MeshBuffers {
     vertex_buffer_size := u64(len(vertices) * size_of(MeshVertex))
     index_buffer_size := u64(len(indices) * size_of(u32))
@@ -64,6 +65,7 @@ mesh_upload_to_GPU :: proc(renderer: ^Renderer, vertices: []MeshVertex, indices:
 
     staging_buffer := buffer_create(renderer, vertex_buffer_size + index_buffer_size, 1, { .TRANSFER_SRC }, .CPU_ONLY)
     defer buffer_destroy(renderer, &staging_buffer)
+    buffer_map(renderer, &staging_buffer)
     buffer_write_data(renderer, &staging_buffer, raw_data(vertices), vertex_buffer_size)
     buffer_write_data(renderer, &staging_buffer, raw_data(indices), index_buffer_size, vertex_buffer_size)
 
@@ -104,6 +106,7 @@ mesh_upload_to_GPU :: proc(renderer: ^Renderer, vertices: []MeshVertex, indices:
     return mesh
 }
 
+@(private)
 mesh_buffers_destroy :: proc(renderer: ^Renderer, buffers: ^MeshBuffers) {
     buffer_destroy(renderer, &buffers.vertex_buffer)
     buffer_destroy(renderer, &buffers.index_buffer)
@@ -127,9 +130,13 @@ mesh_create_rectangle :: proc(renderer: ^Renderer, width, height: f32) -> ^MeshA
 
     mesh := new(MeshAsset)
     mesh.mesh_buffers = mesh_upload_to_GPU(renderer, vertices, indices)
-    mesh.surfaces = []GeometricSurface{
-        { start_index = 0, count = u32(len(indices)) }
-    }
+    mesh.surfaces = make([]GeometricSurface, 1)
+    mesh.surfaces[0] = { start_index = 0, count = u32(len(indices)) }
 
     return mesh
+}
+mesh_destroy :: proc(renderer: ^Renderer, mesh: ^MeshAsset) {
+    mesh_buffers_destroy(renderer, &mesh.mesh_buffers)
+    delete(mesh.surfaces)
+    free(mesh)
 }

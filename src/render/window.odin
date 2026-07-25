@@ -120,7 +120,6 @@ surface_initialize :: proc(renderer: ^Renderer) {
     }
 }
 
-// TODO: 07/03/2026 need to revisit and fix the resizing/set_fullscreen issues. Not important for now though
 @(private)
 window_set_callbacks :: proc(renderer: ^Renderer) {
     glfw.SetWindowUserPointer(renderer.window.glfw_window, renderer)

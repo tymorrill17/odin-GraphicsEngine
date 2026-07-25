@@ -51,9 +51,9 @@ pool_size_ratios :: []PoolSizeRatio{
 };
 
 DrawPushConstants :: struct {
-    world_matrix:       matrix[4,4]f32,
-    vertex_buffer_addr: vk.DeviceAddress,
-    index_buffer_addr:  vk.DeviceAddress,
+    world_matrix:           matrix[4,4]f32,
+    vertex_buffer_addr:     vk.DeviceAddress,
+    instance_buffer_addr:   vk.DeviceAddress,
 }
 
 RendererConfig :: struct {
@@ -342,17 +342,17 @@ draw :: proc(renderer: ^Renderer) {
             last_pipeline = render_object.material.pipeline
         }
         if render_object.material != last_material {
-            // Then we need to bind the new material descriptors
-            vk.CmdBindDescriptorSets(cmd, .GRAPHICS, render_object.material.pipeline.layout,
+            // Then we need to bind the new material descriptors (if they exist)
+            if render_object.material.descriptor != 0 do vk.CmdBindDescriptorSets(cmd, .GRAPHICS, render_object.material.pipeline.layout,
                 0, 1, &render_object.material.descriptor, 0, nil)
             last_material = render_object.material
         }
 
         vk.CmdBindIndexBuffer(cmd, render_object.index_buffer, 0, .UINT32)
         push_constants := DrawPushConstants{
-            world_matrix = render_object.transform,
-            vertex_buffer_addr = render_object.vertex_buffer_addr,
-            index_buffer_addr = render_object.instance_buffer_addr,
+            world_matrix         = render_object.transform,
+            vertex_buffer_addr   = render_object.vertex_buffer_addr,
+            instance_buffer_addr = render_object.instance_buffer_addr^,
         }
         vk.CmdPushConstants(cmd, render_object.material.pipeline.layout, { .VERTEX }, 0, size_of(push_constants), &push_constants)
         vk.CmdDrawIndexed(cmd, render_object.index_count, render_object.instance_count, render_object.first_index, 0, 0)

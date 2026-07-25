@@ -18,8 +18,8 @@ requested_device_extensions : []cstring : {
 }
 
 CameraParams :: struct{
-    position:       [3]f32,
-    center:         [3]f32,
+    position:       [3]f32, // position of camera
+    center:         [3]f32, // Where camera is looking
     near_plane:     f32,
     far_plane:      f32,
     scale:          f32,
@@ -27,7 +27,8 @@ CameraParams :: struct{
 
 CameraData :: struct {
     viewproj:   matrix[4, 4]f32,
-    model:      matrix[4, 4]f32,
+    view:       matrix[4, 4]f32,
+    proj:       matrix[4, 4]f32,
 };
 
 
@@ -49,12 +50,21 @@ get_fluid_material :: proc(renderer: ^render.Renderer) -> render.MaterialInstanc
     render.pipeline_cfg_set_color_attachment_format(&pipeline_cfg, renderer.draw_image.format)
     render.pipeline_cfg_set_depth_attachment_format(&pipeline_cfg, renderer.depth_image.format)
     render.pipeline_cfg_set_depth_test(&pipeline_cfg, .GREATER_OR_EQUAL)
-    render.pipeline_cfg_add_descriptor(&pipeline_cfg, renderer.scene_descriptor_layouts[0])
+    render.pipeline_cfg_add_push_constant_range(&pipeline_cfg, { .VERTEX }, size_of(render.DrawPushConstants))
+
+    for layout in renderer.scene_descriptor_layouts {
+        render.pipeline_cfg_add_descriptor(&pipeline_cfg, layout)
+    }
 
     material: render.MaterialInstance
     material.pass_type = .transparent
-    // WARNING: if I have multiple scene descriptors, this will need to change
-    material.descriptor = renderer.scene_descriptors[0]
+
+    // TODO: create this descriptor (if even needed?)
+    // material_descriptor_layout: vk.DescriptorSetLayout
+    // render.pipeline_cfg_add_descriptor(&pipeline_cfg, material_descriptor_layout)
+    // material_descriptor: vk.DescriptorSet
+    // material.descriptor = material_descriptor
+
     material.pipeline = render.pipeline_cfg_build_pipeline(&pipeline_cfg, renderer)
     return material
 }
@@ -79,38 +89,50 @@ main :: proc() {
     render.renderer_initialize(&r, renderer_config)
     defer render.renderer_shutdown(&r)
 
-    global_uniform_buffer := render.buffer_create(&r, size_of(CameraData), 1, { .UNIFORM_BUFFER }, .CPU_TO_GPU)
+    // Create an instance of the global uniform buffer for each frame in flight
+    global_uniform_buffer := render.buffer_create(&r, size_of(CameraData), u64(r.frames_in_flight), { .UNIFORM_BUFFER }, .CPU_TO_GPU)
     defer render.buffer_destroy(&r, &global_uniform_buffer)
+    render.buffer_map(&r, &global_uniform_buffer)
     camera_data := CameraData{
         viewproj = (1), // initialize to identity matrix
-        model    = (1),
+        view     = (1),
+        proj     = (1),
     }
 
-    layout_builder: render.DescriptorLayoutBuilder
-    render.descriptor_layout_builder_create()
+    layout_builder := render.descriptor_layout_builder_create()
     defer render.descriptor_layout_builder_destroy(&layout_builder)
     defer render.descriptor_layout_builder_destroy_built_layouts(&layout_builder, &r)
-
-    render.descriptor_layout_builder_add_binding(&layout_builder, 0, .UNIFORM_BUFFER, 1, { .VERTEX })
-    global_scene_layout := render.descriptor_layout_builder_build(&layout_builder, &r)
-
-    append(&r.scene_descriptor_layouts, global_scene_layout)
-    append(&r.scene_descriptors, render.descriptor_set_create(&r, { global_scene_layout }))
     descriptor_writer := render.descriptor_writer_create()
     defer render.descriptor_writer_destroy(&descriptor_writer)
 
-    particle_mesh := render.mesh_create_rectangle(&r, 1, 1)
+    // Build the descriptor layout for the global scene descriptors (like camera data, etc)
+    render.descriptor_layout_builder_add_binding(&layout_builder, 0, .UNIFORM_BUFFER, 1, { .VERTEX })
+    global_scene_layout := render.descriptor_layout_builder_build(&layout_builder, &r)
+    append(&r.scene_descriptor_layouts, global_scene_layout)
+    append(&r.scene_descriptors, render.descriptor_set_create(&r, { global_scene_layout }))
+
+    // Point the global descriptors to their buffers in the Renderer class
+    render.descriptor_writer_add_buffers(&descriptor_writer, r.scene_descriptors[0], 0, { global_uniform_buffer }, .UNIFORM_BUFFER)
+    render.descriptor_writer_update_sets(&descriptor_writer, &r)
+
     // TODO: Write vertex and fragment shader for particle system rendering
+    particle_mesh := render.mesh_create_rectangle(&r, 1, 1)
+    defer render.mesh_destroy(&r, particle_mesh)
     fluid_material := get_fluid_material(&r)
+    defer render.pipeline_destroy(&r, &fluid_material.pipeline)
     n_particles: u32 = 1000
 
     fluid_particle_system := render.particle_system_create(&r, n_particles, (0), particle_mesh, &fluid_material)
     defer render.particle_system_destroy(&fluid_particle_system, &r)
     append(&r.renderables, render.particle_system_get_render_object(&fluid_particle_system, &r))
 
+    // TODO: arrange the particles in their starting positions
+
+
+    // TODO: use this data to update the camera_data buffer
     camera_config := CameraParams{
-        position    = (0),
-        center      = (0),
+        center      = {0, 0, 0},
+        position    = {0, 0, 1},
         near_plane  = 0.1,
         far_plane   = 10000,
         scale       = 5,
@@ -128,10 +150,7 @@ main :: proc() {
 		imgui.End();
 
         // TODO: Fill model and viewproj matrices
-
-        // Write to uniform buffer
-        render.descriptor_writer_add_buffers(&descriptor_writer, r.scene_descriptors[0], 0, { global_uniform_buffer }, .UNIFORM_BUFFER)
-        render.descriptor_writer_update_sets(&descriptor_writer, &r)
+        render.buffer_write_data(&r, &global_uniform_buffer, rawptr(&camera_data))
 
         render.draw(&r)
     }
