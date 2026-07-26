@@ -97,8 +97,9 @@ Renderer :: struct {
     current_swpch_render_sem:   ^vk.Semaphore,
 
     renderables:                [dynamic]RenderObject,
-    scene_descriptors:          [dynamic]vk.DescriptorSet,
+    scene_descriptors:          [dynamic]DescriptorSet,
     scene_descriptor_layouts:   [dynamic]vk.DescriptorSetLayout,
+    scene_buffers:              [dynamic]Buffer,
 
     frame_number:               u64,
     frame_index:                u32,
@@ -181,9 +182,10 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     // initialize descriptor allocator
     descriptor_allocator_initialize(renderer, renderer_cfg.initial_descriptor_set_count, pool_size_ratios)
 
-    renderer.renderables = make([dynamic]RenderObject)
-    renderer.scene_descriptors = make([dynamic]vk.DescriptorSet)
-    renderer.scene_descriptor_layouts = make([dynamic]vk.DescriptorSetLayout)
+    renderer.renderables                = make([dynamic]RenderObject)
+    renderer.scene_descriptors          = make([dynamic]DescriptorSet)
+    renderer.scene_descriptor_layouts   = make([dynamic]vk.DescriptorSetLayout)
+    renderer.scene_buffers              = make([dynamic]Buffer)
 
     renderer.render_scale = 1
     renderer.frame_index  = 0
@@ -203,6 +205,7 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
 
     gui_destroy(renderer)
 
+    delete(renderer.scene_buffers)
     delete(renderer.scene_descriptor_layouts)
     delete(renderer.scene_descriptors)
     delete(renderer.renderables)
@@ -337,8 +340,8 @@ draw :: proc(renderer: ^Renderer) {
         if render_object.material.pipeline != last_pipeline {
             // Then we need to bind the new pipeline
             vk.CmdBindPipeline(cmd, .GRAPHICS, render_object.material.pipeline.handle)
-            vk.CmdBindDescriptorSets(cmd, .GRAPHICS, render_object.material.pipeline.layout,
-                0, u32(len(renderer.scene_descriptors)), raw_data(renderer.scene_descriptors), 0, nil)
+            descriptor_set_bind(cmd, .GRAPHICS, render_object.material.pipeline.layout,
+                0, renderer.scene_descriptors[:], renderer.frame_index)
             last_pipeline = render_object.material.pipeline
         }
         if render_object.material != last_material {

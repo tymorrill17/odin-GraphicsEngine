@@ -38,11 +38,13 @@ buffer_create :: proc(renderer: ^Renderer, instance_bytes: u64, instance_count: 
         min_offset_alignment = 1
     }
 
+    alignment_bytes := find_alignment(instance_bytes, min_offset_alignment)
+
     new_buffer := Buffer{
         instance_bytes = instance_bytes,
         instance_count = instance_count,
-        total_bytes = instance_bytes * instance_count,
-        alignment = find_alignment(instance_bytes, min_offset_alignment)
+        total_bytes = alignment_bytes * instance_count,
+        alignment = alignment_bytes
     }
 
     buffer_info := vk.BufferCreateInfo{
@@ -89,8 +91,8 @@ buffer_write_data :: proc(renderer: ^Renderer, buffer: ^Buffer,
 }
 
 buffer_write_data_at_index :: proc(renderer: ^Renderer, buffer: ^Buffer,
-    data: rawptr, index: u64) {
+    data: rawptr, index: u32) {
 
-    buffer_write_data(renderer, buffer, data, buffer.instance_bytes, index * buffer.alignment)
+    buffer_write_data(renderer, buffer, data, buffer.instance_bytes, u64(index) * buffer.alignment)
 }
 

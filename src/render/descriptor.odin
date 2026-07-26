@@ -11,6 +11,16 @@ PoolSizeRatio :: struct {
     ratio: f32
 }
 
+DescriptorDynamicBinding :: struct {
+    binding:    u32,
+    alignment:  u64,
+}
+
+DescriptorSet :: struct {
+    handle:                vk.DescriptorSet,
+    dynamic_bindings:   [dynamic]DescriptorDynamicBinding,
+}
+
 // Descriptor Layout Builder
 
 DescriptorLayoutBuilder :: struct {
@@ -152,7 +162,7 @@ descriptor_allocator_expand_open_pools :: proc(renderer: ^Renderer, set_count: u
     append(&renderer.descriptor_allocator.open_pools, pool)
 }
 
-descriptor_set_create :: proc(renderer: ^Renderer, layouts: []vk.DescriptorSetLayout) -> vk.DescriptorSet {
+descriptor_set_create :: proc(renderer: ^Renderer, layouts: []vk.DescriptorSetLayout) -> DescriptorSet {
     get_open_pool :: proc(renderer: ^Renderer) -> vk.DescriptorPool {
         if len(renderer.descriptor_allocator.open_pools) == 0 { // There are no open pools, need to make one
             descriptor_allocator_expand_open_pools(renderer, renderer.descriptor_allocator.sets_per_pool, renderer.descriptor_allocator.pool_size_ratios[:])
@@ -172,16 +182,17 @@ descriptor_set_create :: proc(renderer: ^Renderer, layouts: []vk.DescriptorSetLa
         pSetLayouts         = raw_data(layouts),
     }
 
-    new_set: vk.DescriptorSet
+    new_set: DescriptorSet
+    new_set.dynamic_bindings = make([dynamic]DescriptorDynamicBinding)
     result: vk.Result
-    if result = vk.AllocateDescriptorSets(renderer.logical_device, &alloc_info, &new_set); result != .SUCCESS {
+    if result = vk.AllocateDescriptorSets(renderer.logical_device, &alloc_info, &new_set.handle); result != .SUCCESS {
         if result == .ERROR_OUT_OF_POOL_MEMORY || result == .ERROR_FRAGMENTED_POOL {
             // Then try again with a new pool
             append(&renderer.descriptor_allocator.full_pools, pool_to_use)
             pop(&renderer.descriptor_allocator.open_pools)
             pool_to_use = get_open_pool(renderer)
             alloc_info.descriptorPool = pool_to_use
-            result = vk.AllocateDescriptorSets(renderer.logical_device, &alloc_info, &new_set)
+            result = vk.AllocateDescriptorSets(renderer.logical_device, &alloc_info, &new_set.handle)
         }
         if result != .SUCCESS {
             log.panic("Failed to allocate descriptor set!")
@@ -189,6 +200,33 @@ descriptor_set_create :: proc(renderer: ^Renderer, layouts: []vk.DescriptorSetLa
     }
 
     return new_set
+}
+
+descriptor_set_destroy :: proc(set: ^DescriptorSet) {
+    delete(set.dynamic_bindings)
+    set^ = {}
+}
+
+descriptor_set_bind :: proc(cmd: vk.CommandBuffer, bind_point: vk.PipelineBindPoint,
+    layout: vk.PipelineLayout, first_set: u32, sets: []DescriptorSet, offset: u32) {
+
+    handles := make([]vk.DescriptorSet, len(sets))
+    defer delete(handles)
+    for set, i in sets {
+        handles[i] = set.handle
+    }
+
+    offsets := make([dynamic]u32)
+    defer delete(offsets)
+    reserve(&offsets, len(sets))
+    for set in sets {
+        for binding in set.dynamic_bindings {
+            append(&offsets, u32(u64(offset) * binding.alignment))
+        }
+    }
+
+    vk.CmdBindDescriptorSets(cmd, bind_point, layout, first_set,
+        u32(len(sets)), &handles[0], u32(len(offsets)), len(offsets) > 0 ? &offsets[0] : nil)
 }
 
 // Descriptor Writer
@@ -236,22 +274,38 @@ descriptor_writer_add_images :: proc(writer: ^DescriptorWriter, set: vk.Descript
     append(&writer.writes, write)
 }
 
-descriptor_writer_add_buffers :: proc(writer: ^DescriptorWriter, set: vk.DescriptorSet, binding: uint, buffers: []Buffer, type: vk.DescriptorType, offset: u64 = 0, size: u64 = vk.WHOLE_SIZE, set_index: uint = 0) {
+descriptor_writer_add_buffers :: proc(writer: ^DescriptorWriter, set: ^DescriptorSet, binding: uint, buffers: []Buffer, type: vk.DescriptorType) {
+    is_dynamic := type == .UNIFORM_BUFFER_DYNAMIC || type == .STORAGE_BUFFER_DYNAMIC
     writer_allocator := virtual.arena_allocator(&writer.arena)
     buffer_infos := make([]vk.DescriptorBufferInfo, len(buffers), writer_allocator)
     for buffer, i in buffers {
         buffer_infos[i] = vk.DescriptorBufferInfo{
             buffer = buffer.handle,
-            offset = vk.DeviceSize(offset),
-            range  = vk.DeviceSize(size),
+            offset = 0,
+            range  = vk.DeviceSize(buffer.instance_bytes), // For dynamic buffers, we just want to write the size of one instance
+        }
+        // Dynamic Buffers must have offset info and they must be in order of binding
+        if is_dynamic {
+            entry := DescriptorDynamicBinding{
+                binding = u32(binding),
+                alignment = buffer.alignment
+            }
+            index: int
+            for dyn_bind, j in set.dynamic_bindings {
+                if dyn_bind.binding > entry.binding {
+                    index = j; break
+                }
+                index = j + 1
+            }
+            inject_at(&set.dynamic_bindings, index, entry)
         }
     }
 
     write := vk.WriteDescriptorSet{
         sType           = vk.StructureType.WRITE_DESCRIPTOR_SET,
-        dstSet          = set,
+        dstSet          = set.handle,
         dstBinding      = u32(binding),
-        dstArrayElement = u32(set_index),
+        dstArrayElement = 0,
         descriptorCount = u32(len(buffers)),
         descriptorType  = type,
         pBufferInfo     = raw_data(buffer_infos),

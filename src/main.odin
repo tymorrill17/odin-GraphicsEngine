@@ -106,13 +106,13 @@ main :: proc() {
     defer render.descriptor_writer_destroy(&descriptor_writer)
 
     // Build the descriptor layout for the global scene descriptors (like camera data, etc)
-    render.descriptor_layout_builder_add_binding(&layout_builder, 0, .UNIFORM_BUFFER, 1, { .VERTEX })
+    render.descriptor_layout_builder_add_binding(&layout_builder, 0, .UNIFORM_BUFFER_DYNAMIC, 1, { .VERTEX })
     global_scene_layout := render.descriptor_layout_builder_build(&layout_builder, &r)
     append(&r.scene_descriptor_layouts, global_scene_layout)
     append(&r.scene_descriptors, render.descriptor_set_create(&r, { global_scene_layout }))
 
     // Point the global descriptors to their buffers in the Renderer class
-    render.descriptor_writer_add_buffers(&descriptor_writer, r.scene_descriptors[0], 0, { global_uniform_buffer }, .UNIFORM_BUFFER)
+    render.descriptor_writer_add_buffers(&descriptor_writer, &r.scene_descriptors[0], 0, { global_uniform_buffer }, .UNIFORM_BUFFER_DYNAMIC)
     render.descriptor_writer_update_sets(&descriptor_writer, &r)
 
     // TODO: Write vertex and fragment shader for particle system rendering
@@ -150,8 +150,10 @@ main :: proc() {
 		imgui.End();
 
         // TODO: Fill model and viewproj matrices
-        render.buffer_write_data(&r, &global_uniform_buffer, rawptr(&camera_data))
+        render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame
 
         render.draw(&r)
     }
+
+    render.wait_idle(&r)
 }
