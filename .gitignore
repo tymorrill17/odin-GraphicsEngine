@@ -4,3 +4,4 @@ thirdparty/
 ols.json
 imgui.ini
 run
+*.cap

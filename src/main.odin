@@ -37,6 +37,8 @@ ParticleConfig :: struct {
     radius:  f32,
 }
 
+MAX_PARTICLES :: 5000000
+
 get_fluid_material :: proc(renderer: ^render.Renderer) -> render.MaterialInstance{
 
     pipeline_cfg := render.pipeline_cfg_create()
@@ -82,17 +84,19 @@ init_particle_positions :: proc(renderer: ^render.Renderer, system: ^render.CPUP
     }
 
     config := ParticleConfig{
-        spacing = 0,
+        spacing = 0.2,
         radius  = 1,
     }
 
     spacing := config.radius + config.spacing
     system.particle_count = n_particles
-    grid_size := u32(math.ceil(math.sqrt(f32(n_particles))))
-    offset := [3]f32{ f32(-(grid_size - 1)) * spacing, f32(-(grid_size - 1)) * spacing, 0 }
+    grid_size := int(math.ceil(math.sqrt(f32(n_particles))))
+    offset := [3]f32{ f32(-(grid_size - 1)) * 0.5 * spacing, f32(-(grid_size - 1)) * 0.5 * spacing, 0 }
 
     for i in 0..<n_particles {
-        system.particles[i].position = { f32(i % grid_size) * 2 * spacing * offset.x, f32(i / grid_size) * 2 * spacing * offset.y, 0 }
+        col := int(i) % grid_size
+        row := int(i) / grid_size
+        system.particles[i].position = { f32(col) * spacing + offset.x, f32(row) * spacing + offset.y, 0 }
     }
 
     instanced_particles := make([]render.ParticleInstance, system.max_particles)
@@ -156,13 +160,11 @@ main :: proc() {
     fluid_material := get_fluid_material(&r)
     defer render.pipeline_destroy(&r, &fluid_material.pipeline)
 
-    max_particles := u32(1000)
-    fluid_particle_system := render.particle_system_create(&r, max_particles, (0), particle_mesh, &fluid_material)
+    fluid_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
     defer render.particle_system_destroy(&fluid_particle_system, &r)
     append(&r.renderables, render.particle_system_get_render_object(&fluid_particle_system, &r))
 
-    // TODO: arrange the particles in their starting positions
-    init_particle_positions(&r, &fluid_particle_system, 1, {1, 1, 1, 1})
+    init_particle_positions(&r, &fluid_particle_system, 10000, {1, 1, 1, 1})
 
     camera_config := CameraConfig{
         center      = {0, 0, 0},
