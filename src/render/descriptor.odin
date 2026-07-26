@@ -208,7 +208,7 @@ descriptor_set_destroy :: proc(set: ^DescriptorSet) {
 }
 
 descriptor_set_bind :: proc(cmd: vk.CommandBuffer, bind_point: vk.PipelineBindPoint,
-    layout: vk.PipelineLayout, first_set: u32, sets: []DescriptorSet, offset: u32) {
+    layout: vk.PipelineLayout, first_set: u32, sets: []^DescriptorSet, offset: u32) {
 
     handles := make([]vk.DescriptorSet, len(sets))
     defer delete(handles)

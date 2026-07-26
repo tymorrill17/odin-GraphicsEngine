@@ -32,6 +32,13 @@ window_create :: proc(width, height: i32, name: cstring) -> Window {
     window.resized      = false
     window.minimized    = false
 
+    when ODIN_OS == .Linux {
+        glfw.InitHint(glfw.PLATFORM, glfw.PLATFORM_X11)
+    }
+    when ODIN_OS == .Windows {
+        glfw.InitHint(glfw.PLATFORM, glfw.PLATFORM_WIN32)
+    }
+
     if !glfw.Init() {
         log.panic("GLFW initialization failed!")
     }
@@ -98,6 +105,7 @@ update_window_info :: proc(window: ^Window) {
     window.extent.x, window.extent.y           = glfw.GetWindowSize(window.glfw_window)
     window.draw_extent.x, window.draw_extent.y = glfw.GetFramebufferSize(window.glfw_window)
     window.position.x, window.position.y       = glfw.GetWindowPos(window.glfw_window)
+    window.aspect_ratio                        = f32(window.extent.x) / f32(window.extent.y)
 }
 
 @(private)

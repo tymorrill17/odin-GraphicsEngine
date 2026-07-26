@@ -97,7 +97,7 @@ Renderer :: struct {
     current_swpch_render_sem:   ^vk.Semaphore,
 
     renderables:                [dynamic]RenderObject,
-    scene_descriptors:          [dynamic]DescriptorSet,
+    scene_descriptors:          [dynamic]^DescriptorSet,
     scene_descriptor_layouts:   [dynamic]vk.DescriptorSetLayout,
     scene_buffers:              [dynamic]Buffer,
 
@@ -183,7 +183,7 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     descriptor_allocator_initialize(renderer, renderer_cfg.initial_descriptor_set_count, pool_size_ratios)
 
     renderer.renderables                = make([dynamic]RenderObject)
-    renderer.scene_descriptors          = make([dynamic]DescriptorSet)
+    renderer.scene_descriptors          = make([dynamic]^DescriptorSet)
     renderer.scene_descriptor_layouts   = make([dynamic]vk.DescriptorSetLayout)
     renderer.scene_buffers              = make([dynamic]Buffer)
 
@@ -340,14 +340,18 @@ draw :: proc(renderer: ^Renderer) {
         if render_object.material.pipeline != last_pipeline {
             // Then we need to bind the new pipeline
             vk.CmdBindPipeline(cmd, .GRAPHICS, render_object.material.pipeline.handle)
-            descriptor_set_bind(cmd, .GRAPHICS, render_object.material.pipeline.layout,
-                0, renderer.scene_descriptors[:], renderer.frame_index)
+            if (len(renderer.scene_descriptors) > 0) {
+                descriptor_set_bind(cmd, .GRAPHICS, render_object.material.pipeline.layout,
+                    0, renderer.scene_descriptors[:], renderer.frame_index)
+            }
             last_pipeline = render_object.material.pipeline
         }
         if render_object.material != last_material {
             // Then we need to bind the new material descriptors (if they exist)
-            if render_object.material.descriptor != 0 do vk.CmdBindDescriptorSets(cmd, .GRAPHICS, render_object.material.pipeline.layout,
-                0, 1, &render_object.material.descriptor, 0, nil)
+            if render_object.material.descriptor != nil {
+                descriptor_set_bind(cmd, .GRAPHICS, render_object.material.pipeline.layout,
+                    0, { render_object.material.descriptor }, renderer.frame_index)
+            }
             last_material = render_object.material
         }
 
@@ -358,7 +362,7 @@ draw :: proc(renderer: ^Renderer) {
             instance_buffer_addr = render_object.instance_buffer_addr^,
         }
         vk.CmdPushConstants(cmd, render_object.material.pipeline.layout, { .VERTEX }, 0, size_of(push_constants), &push_constants)
-        vk.CmdDrawIndexed(cmd, render_object.index_count, render_object.instance_count, render_object.first_index, 0, 0)
+        vk.CmdDrawIndexed(cmd, render_object.index_count, render_object.instance_count^, render_object.first_index, 0, 0)
     }
 
     vk.CmdEndRendering(cmd)

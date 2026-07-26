@@ -13,7 +13,7 @@ shader_module_create_from_file :: proc(renderer: ^Renderer, filename: string) ->
     code, read_err := os.read_entire_file(shader_path, context.temp_allocator)
     defer free_all(context.temp_allocator)
     if read_err != nil {
-        log.errorf("Failed to read shader file %s: error %v", shader_path, read_err)
+        log.panicf("Failed to read shader file %s: error %v", shader_path, read_err)
     }
 
     assert(len(code) % 4 == 0, "SPIR-V code length must be a multiple of 4 bytes!")

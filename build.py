@@ -23,7 +23,7 @@ SHADER_BIN_DIR      = "spirv"
 SHADER_SRC_EXT      = ".slang"
 SHADER_TARGET       = "spirv"
 SHADER_PROFILE      = "spirv_1_6"
-SHADER_EXTRA_ARGS   = ["-fvk-use-entrypoint-name"]
+SHADER_EXTRA_ARGS   = ["-fvk-use-entrypoint-name", "-matrix-layout-column-major"]
 
 PROJECT_DIR         = Path(__file__).resolve().parent # Get the project root
 

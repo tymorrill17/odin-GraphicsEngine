@@ -39,7 +39,7 @@ particle_system_get_render_object :: proc(system: ^CPUParticleSystem, renderer: 
         transform               = system.transform,
         vertex_buffer_addr      = system.mesh.mesh_buffers.vertex_buffer_addr,
         instance_buffer_addr    = system.current_particle_buffer_addr,
-        instance_count          = u32(len(system.particles)),
+        instance_count          = &system.particle_count,
     }
 }
 

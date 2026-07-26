@@ -9,7 +9,7 @@ MaterialPass :: enum {
 
 MaterialInstance :: struct {
     pipeline:   Pipeline,
-    descriptor: vk.DescriptorSet,
+    descriptor: ^DescriptorSet,
     pass_type:  MaterialPass
 }
 
@@ -21,7 +21,7 @@ RenderObject :: struct {
     transform:              matrix[4,4]f32,
     vertex_buffer_addr:     vk.DeviceAddress,
     instance_buffer_addr:   ^vk.DeviceAddress, // If we are rendering multiple instances of this object, store the positions here
-    instance_count:         u32,              // How many instances are we rendering?
+    instance_count:         ^u32,              // How many instances are we rendering?
 }
 
 MeshBuffers :: struct {

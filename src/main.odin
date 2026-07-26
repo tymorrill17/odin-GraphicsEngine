@@ -4,6 +4,7 @@ import "thirdparty:imgui"
 import vk "vendor:vulkan"
 import "render"
 import "core:log"
+import "core:math"
 
 APPLICATION_WIDTH  :: 1280
 APPLICATION_HEIGHT :: 720
@@ -17,7 +18,7 @@ requested_device_extensions : []cstring : {
     "VK_GOOGLE_user_type"
 }
 
-CameraParams :: struct{
+CameraConfig :: struct{
     position:       [3]f32, // position of camera
     center:         [3]f32, // Where camera is looking
     near_plane:     f32,
@@ -31,6 +32,10 @@ CameraData :: struct {
     proj:       matrix[4, 4]f32,
 };
 
+ParticleConfig :: struct {
+    spacing: f32,
+    radius:  f32,
+}
 
 get_fluid_material :: proc(renderer: ^render.Renderer) -> render.MaterialInstance{
 
@@ -69,6 +74,36 @@ get_fluid_material :: proc(renderer: ^render.Renderer) -> render.MaterialInstanc
     return material
 }
 
+init_particle_positions :: proc(renderer: ^render.Renderer, system: ^render.CPUParticleSystem, n_particles: u32, color: [4]f32) {
+    for &particle in system.particles {
+        particle.position = 0
+        particle.velocity = 0
+        particle.color = color
+    }
+
+    config := ParticleConfig{
+        spacing = 0,
+        radius  = 1,
+    }
+
+    spacing := config.radius + config.spacing
+    system.particle_count = n_particles
+    grid_size := u32(math.ceil(math.sqrt(f32(n_particles))))
+    offset := [3]f32{ f32(-(grid_size - 1)) * spacing, f32(-(grid_size - 1)) * spacing, 0 }
+
+    for i in 0..<n_particles {
+        system.particles[i].position = { f32(i % grid_size) * 2 * spacing * offset.x, f32(i / grid_size) * 2 * spacing * offset.y, 0 }
+    }
+
+    instanced_particles := make([]render.ParticleInstance, system.max_particles)
+    defer delete(instanced_particles)
+    for i in 0..<n_particles {
+        instanced_particles[i] = {position = system.particles[i].position, size = config.radius, color = color}
+    }
+    for &buffer in system.particle_buffers {
+        render.buffer_write_data(renderer, &buffer, raw_data(instanced_particles))
+    }
+}
 
 main :: proc() {
 
@@ -109,28 +144,27 @@ main :: proc() {
     render.descriptor_layout_builder_add_binding(&layout_builder, 0, .UNIFORM_BUFFER_DYNAMIC, 1, { .VERTEX })
     global_scene_layout := render.descriptor_layout_builder_build(&layout_builder, &r)
     append(&r.scene_descriptor_layouts, global_scene_layout)
-    append(&r.scene_descriptors, render.descriptor_set_create(&r, { global_scene_layout }))
+    camera_descriptor := render.descriptor_set_create(&r, { global_scene_layout })
+    append(&r.scene_descriptors, &camera_descriptor)
 
     // Point the global descriptors to their buffers in the Renderer class
-    render.descriptor_writer_add_buffers(&descriptor_writer, &r.scene_descriptors[0], 0, { global_uniform_buffer }, .UNIFORM_BUFFER_DYNAMIC)
+    render.descriptor_writer_add_buffers(&descriptor_writer, r.scene_descriptors[0], 0, { global_uniform_buffer }, .UNIFORM_BUFFER_DYNAMIC)
     render.descriptor_writer_update_sets(&descriptor_writer, &r)
 
-    // TODO: Write vertex and fragment shader for particle system rendering
     particle_mesh := render.mesh_create_rectangle(&r, 1, 1)
     defer render.mesh_destroy(&r, particle_mesh)
     fluid_material := get_fluid_material(&r)
     defer render.pipeline_destroy(&r, &fluid_material.pipeline)
-    n_particles: u32 = 1000
 
-    fluid_particle_system := render.particle_system_create(&r, n_particles, (0), particle_mesh, &fluid_material)
+    max_particles := u32(1000)
+    fluid_particle_system := render.particle_system_create(&r, max_particles, (0), particle_mesh, &fluid_material)
     defer render.particle_system_destroy(&fluid_particle_system, &r)
     append(&r.renderables, render.particle_system_get_render_object(&fluid_particle_system, &r))
 
     // TODO: arrange the particles in their starting positions
+    init_particle_positions(&r, &fluid_particle_system, 1, {1, 1, 1, 1})
 
-
-    // TODO: use this data to update the camera_data buffer
-    camera_config := CameraParams{
+    camera_config := CameraConfig{
         center      = {0, 0, 0},
         position    = {0, 0, 1},
         near_plane  = 0.1,
@@ -141,7 +175,7 @@ main :: proc() {
     for !render.window_should_close(&r) {
         render.start_frame(&r)
 
-		imgui.Begin("CameraParams");
+		imgui.Begin("Camera Config");
         imgui.DragFloat3("Position", &camera_config.position, 0.1);
         imgui.DragFloat3("Center", &camera_config.center, 0.1);
         imgui.DragFloat("Far Plane", &camera_config.far_plane, 1);
@@ -149,7 +183,13 @@ main :: proc() {
         imgui.DragFloat("Orthographic Scale", &camera_config.scale, 0.1);
 		imgui.End();
 
-        // TODO: Fill model and viewproj matrices
+        aspect_ratio := r.window.aspect_ratio
+        up := [3]f32{ 0, 1, 0 }
+        camera_data.proj = render.projection_set_orthographic(-aspect_ratio * 0.5 * camera_config.scale, aspect_ratio * 0.5 * camera_config.scale,
+            -0.5 * camera_config.scale, 0.5 * camera_config.scale,
+            camera_config.near_plane, camera_config.far_plane)
+        camera_data.view = render.view_set_target(camera_config.position, camera_config.center, up)
+        camera_data.viewproj = camera_data.proj * camera_data.view
         render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame
 
         render.draw(&r)
