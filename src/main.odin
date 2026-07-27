@@ -4,10 +4,9 @@ import "thirdparty:imgui"
 import vk "vendor:vulkan"
 import "render"
 import "core:log"
-import "core:math"
 
-APPLICATION_WIDTH  :: 1280
-APPLICATION_HEIGHT :: 720
+APPLICATION_WIDTH  :: 1920
+APPLICATION_HEIGHT :: 1080
 
 requested_validation_layers : []cstring : {
     "VK_LAYER_KHRONOS_validation", // Standard validation layer preset
@@ -32,82 +31,6 @@ CameraData :: struct {
     proj:       matrix[4, 4]f32,
 };
 
-ParticleConfig :: struct {
-    spacing: f32,
-    radius:  f32,
-}
-
-MAX_PARTICLES :: 5000000
-
-get_fluid_material :: proc(renderer: ^render.Renderer) -> render.MaterialInstance{
-
-    pipeline_cfg := render.pipeline_cfg_create()
-    defer render.pipeline_cfg_destroy(&pipeline_cfg)
-
-    shader := render.shader_module_create_from_file(renderer, "particle.slang.spv")
-    defer render.shader_module_destroy(renderer, shader)
-
-    render.pipeline_cfg_add_shader(&pipeline_cfg, shader, { .VERTEX }, "vertex_main")
-    render.pipeline_cfg_add_shader(&pipeline_cfg, shader, { .FRAGMENT }, "fragment_main")
-    render.pipeline_cfg_set_input_topology(&pipeline_cfg, .TRIANGLE_LIST)
-    render.pipeline_cfg_set_polygon_mode(&pipeline_cfg, .FILL)
-    render.pipeline_cfg_set_cull_mode(&pipeline_cfg, {}, .CLOCKWISE)
-    render.pipeline_cfg_set_multisampling(&pipeline_cfg, { ._1 })
-    render.pipeline_cfg_set_blending(&pipeline_cfg, .ALPHA)
-    render.pipeline_cfg_set_color_attachment_format(&pipeline_cfg, renderer.draw_image.format)
-    render.pipeline_cfg_set_depth_attachment_format(&pipeline_cfg, renderer.depth_image.format)
-    render.pipeline_cfg_set_depth_test(&pipeline_cfg, .GREATER_OR_EQUAL)
-    render.pipeline_cfg_add_push_constant_range(&pipeline_cfg, { .VERTEX }, size_of(render.DrawPushConstants))
-
-    for layout in renderer.scene_descriptor_layouts {
-        render.pipeline_cfg_add_descriptor(&pipeline_cfg, layout)
-    }
-
-    material: render.MaterialInstance
-    material.pass_type = .transparent
-
-    // TODO: create this descriptor (if even needed?)
-    // material_descriptor_layout: vk.DescriptorSetLayout
-    // render.pipeline_cfg_add_descriptor(&pipeline_cfg, material_descriptor_layout)
-    // material_descriptor: vk.DescriptorSet
-    // material.descriptor = material_descriptor
-
-    material.pipeline = render.pipeline_cfg_build_pipeline(&pipeline_cfg, renderer)
-    return material
-}
-
-init_particle_positions :: proc(renderer: ^render.Renderer, system: ^render.CPUParticleSystem, n_particles: u32, color: [4]f32) {
-    for &particle in system.particles {
-        particle.position = 0
-        particle.velocity = 0
-        particle.color = color
-    }
-
-    config := ParticleConfig{
-        spacing = 0.2,
-        radius  = 1,
-    }
-
-    spacing := config.radius + config.spacing
-    system.particle_count = n_particles
-    grid_size := int(math.ceil(math.sqrt(f32(n_particles))))
-    offset := [3]f32{ f32(-(grid_size - 1)) * 0.5 * spacing, f32(-(grid_size - 1)) * 0.5 * spacing, 0 }
-
-    for i in 0..<n_particles {
-        col := int(i) % grid_size
-        row := int(i) / grid_size
-        system.particles[i].position = { f32(col) * spacing + offset.x, f32(row) * spacing + offset.y, 0 }
-    }
-
-    instanced_particles := make([]render.ParticleInstance, system.max_particles)
-    defer delete(instanced_particles)
-    for i in 0..<n_particles {
-        instanced_particles[i] = {position = system.particles[i].position, size = config.radius, color = color}
-    }
-    for &buffer in system.particle_buffers {
-        render.buffer_write_data(renderer, &buffer, raw_data(instanced_particles))
-    }
-}
 
 main :: proc() {
 
@@ -157,14 +80,19 @@ main :: proc() {
 
     particle_mesh := render.mesh_create_rectangle(&r, 1, 1)
     defer render.mesh_destroy(&r, particle_mesh)
-    fluid_material := get_fluid_material(&r)
+    fluid_material := fluidsim_get_material(&r)
     defer render.pipeline_destroy(&r, &fluid_material.pipeline)
 
-    fluid_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
-    defer render.particle_system_destroy(&fluid_particle_system, &r)
-    append(&r.renderables, render.particle_system_get_render_object(&fluid_particle_system, &r))
+    fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
+    defer render.particle_system_destroy(&fluidsim_particle_system, &r)
+    append(&r.renderables, render.particle_system_get_render_object(&fluidsim_particle_system, &r))
 
-    init_particle_positions(&r, &fluid_particle_system, 10000, {1, 1, 1, 1})
+    particle_config := ParticleConfig{
+        spacing     = 0.01,
+        radius      = 0.1,
+        n_particles = 10000,
+        default_color = [4]f32{ 1, 1, 1, 1 },
+    }
 
     camera_config := CameraConfig{
         center      = {0, 0, 0},
@@ -185,14 +113,24 @@ main :: proc() {
         imgui.DragFloat("Orthographic Scale", &camera_config.scale, 0.1);
 		imgui.End();
 
+		imgui.Begin("Particle Config");
+        imgui.DragFloat("Spacing", &particle_config.spacing, 0.01);
+        imgui.DragFloat("Radius", &particle_config.radius, .01);
+        imgui.DragScalar("Number of Particles", .U32, rawptr(&particle_config.n_particles), .01);
+        imgui.ColorPicker4("Default Color", &particle_config.default_color)
+		imgui.End();
+
         aspect_ratio := r.window.aspect_ratio
         up := [3]f32{ 0, 1, 0 }
         camera_data.proj = render.projection_set_orthographic(-aspect_ratio * 0.5 * camera_config.scale, aspect_ratio * 0.5 * camera_config.scale,
             -0.5 * camera_config.scale, 0.5 * camera_config.scale,
             camera_config.near_plane, camera_config.far_plane)
-        camera_data.view = render.view_set_target(camera_config.position, camera_config.center, up)
+        camera_data.view = render.view_set_direction(camera_config.position, { 0, 0, -1 }, up)
         camera_data.viewproj = camera_data.proj * camera_data.view
         render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame
+
+        // Update fluidsim particles
+        fluidsim_update_particles(&fluidsim_particle_system, &r, &particle_config, false)
 
         render.draw(&r)
     }
