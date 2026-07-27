@@ -1,10 +1,14 @@
 package render
 
 import "core:log"
+import "core:strings"
+import "core:path/filepath"
 import vk "vendor:vulkan"
 import "thirdparty:imgui"
 import "thirdparty:imgui/imgui_impl_glfw"
 import "thirdparty:imgui/imgui_impl_vulkan"
+
+CACHE_DIR :: #config(CACHE_DIR, ".")
 
 @(private="file")
 pool_sizes := []vk.DescriptorPoolSize{
@@ -20,6 +24,14 @@ gui_initialize :: proc(renderer: ^Renderer) {
 
 	// Initialize core structures of ImGui
     imgui.CreateContext()
+
+    // Set the location of the imgui.ini
+    imgui_io := imgui.GetIO()
+    imgui_ini_file, _ := filepath.join({ CACHE_DIR, "imgui.ini" }, context.temp_allocator)
+    imgui_log_file, _ := filepath.join({ CACHE_DIR, "imgui.log" }, context.temp_allocator)
+    defer free_all(context.temp_allocator)
+    imgui_io.IniFilename = strings.clone_to_cstring(imgui_ini_file, context.allocator)
+    imgui_io.LogFilename = strings.clone_to_cstring(imgui_log_file, context.allocator)
 
 	// Initializes ImGui for glfw
     imgui_impl_glfw.InitForVulkan(renderer.window.glfw_window, true)
@@ -70,14 +82,18 @@ gui_initialize :: proc(renderer: ^Renderer) {
     }
 
     imgui_impl_vulkan.Init(&vulkan_init)
+
 }
 
 @(private)
 gui_destroy :: proc(renderer: ^Renderer) {
+    imgui_io := imgui.GetIO()
     imgui_impl_vulkan.Shutdown()
     imgui_impl_glfw.Shutdown()
     imgui.DestroyContext()
     vk.DestroyDescriptorPool(renderer.logical_device, gui_descriptor_pool, nil)
+    delete(imgui_io.IniFilename)
+    delete(imgui_io.LogFilename)
 }
 
 @(private)
