@@ -18,7 +18,7 @@ RenderObject :: struct {
     first_index:            u32,
     index_buffer:           vk.Buffer, // index buffer for the mesh
     material:               ^MaterialInstance,
-    transform:              matrix[4,4]f32,
+    transform:              ^float4x4,
     vertex_buffer_addr:     vk.DeviceAddress,
     instance_buffer_addr:   ^vk.DeviceAddress, // If we are rendering multiple instances of this object, store the positions here
     instance_count:         ^u32,              // How many instances are we rendering?
@@ -41,11 +41,11 @@ MeshAsset :: struct {
 }
 
 MeshVertex :: struct {
-    position:   [3]f32,
+    position:   float3,
     uv_x:       f32,
-    normal:     [3]f32,
+    normal:     float3,
     uv_y:       f32,
-    color:      [4]f32,
+    color:      float4,
 };
 
 // Send vertex and index data to the GPU by creating buffers and writing to them. Returns the created buffers.

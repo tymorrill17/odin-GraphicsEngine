@@ -18,17 +18,17 @@ requested_device_extensions : []cstring : {
 }
 
 CameraConfig :: struct{
-    position:       [3]f32, // position of camera
-    center:         [3]f32, // Where camera is looking
+    position:       render.float3, // position of camera
+    center:         render.float3, // Where camera is looking
     near_plane:     f32,
     far_plane:      f32,
     scale:          f32,
 };
 
 CameraData :: struct {
-    viewproj:   matrix[4, 4]f32,
-    view:       matrix[4, 4]f32,
-    proj:       matrix[4, 4]f32,
+    viewproj:   render.float4x4,
+    view:       render.float4x4,
+    proj:       render.float4x4,
 };
 
 
@@ -83,16 +83,18 @@ main :: proc() {
     fluid_material := fluidsim_get_material(&r)
     defer render.pipeline_destroy(&r, &fluid_material.pipeline)
 
-    fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
-    defer render.particle_system_destroy(&fluidsim_particle_system, &r)
-    append(&r.renderables, render.particle_system_get_render_object(&fluidsim_particle_system, &r))
-
     particle_config := ParticleConfig{
-        spacing     = 0.01,
-        radius      = 0.1,
-        n_particles = 10000,
-        default_color = [4]f32{ 1, 1, 1, 1 },
+        spacing         = 0.01,
+        radius          = 0.1,
+        n_particles     = 10000,
+        default_color   = { 1, 1, 1, 1 },
     }
+
+    fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
+    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config)
+    defer render.particle_system_destroy(&fluidsim_particle_system, &r)
+    fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
+    append(&r.renderables, &fluidsim_render_object)
 
     camera_config := CameraConfig{
         center      = {0, 0, 0},
@@ -101,6 +103,8 @@ main :: proc() {
         far_plane   = 10000,
         scale       = 5,
     };
+
+    physics_dt: f32 = 1.0 / 60
 
     for !render.window_should_close(&r) {
         render.start_frame(&r)
@@ -121,7 +125,7 @@ main :: proc() {
 		imgui.End();
 
         aspect_ratio := r.window.aspect_ratio
-        up := [3]f32{ 0, 1, 0 }
+        up := render.float3{ 0, 1, 0 }
         camera_data.proj = render.projection_set_orthographic(-aspect_ratio * 0.5 * camera_config.scale, aspect_ratio * 0.5 * camera_config.scale,
             -0.5 * camera_config.scale, 0.5 * camera_config.scale,
             camera_config.near_plane, camera_config.far_plane)
@@ -130,7 +134,7 @@ main :: proc() {
         render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame
 
         // Update fluidsim particles
-        fluidsim_update_particles(&fluidsim_particle_system, &r, &particle_config, false)
+        render.particle_system_update(&fluidsim_particle_system, &r, physics_dt)
 
         render.draw(&r)
     }

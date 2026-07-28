@@ -34,10 +34,11 @@ DrawPushConstants push_constants;
 struct VSOutput {
     float4 position : SV_Position;
     float4 pixel_color;
+    float2 local_position;
 };
 
 [shader("vertex")]
-VSOutput vertex_main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
+VSOutput billboard(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
     VSOutput output;
 
     MeshVertex vertex = push_constants.vertex_buffer[vertex_id];
@@ -53,15 +54,27 @@ VSOutput vertex_main(uint vertex_id : SV_VertexID, uint instance_id : SV_Instanc
 
     output.position = mul(g_scene.viewproj, float4(world_pos, 1.0));
     output.pixel_color = vertex.color * particle.color;
+    output.local_position = float2(vertex.uv_x, vertex.uv_y) * 2.0 - 1.0;
 
     return output;
 }
 
-struct PSInput {
-    float4 pixel_color;
-};
+
+typedef VSOutput PSInput;
+//struct PSInput {
+//    float4 position : SV_Position;
+//    float4 pixel_color;
+//    int instance_id;
+//};
 
 [shader("fragment")]
-float4 fragment_main(PSInput input) {
+float4 render_quad_as_circle(PSInput input) {
+    float dist = dot(input.local_position, input.local_position);
+    clip(1.0 - dist);
+    return input.pixel_color;
+}
+
+[shader("fragment")]
+float4 render_quad(PSInput input) {
     return input.pixel_color;
 }

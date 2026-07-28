@@ -7,10 +7,29 @@ ParticleConfig :: struct {
     spacing:        f32,
     radius:         f32,
     n_particles:    u32,
-    default_color:  [4]f32,
+    default_color:  render.float4,
 }
 
 MAX_PARTICLES :: 5000000
+
+FluidSimState :: struct {
+    system:             ^render.CPUParticleSystem,
+    config:             ^ParticleConfig,
+
+    // Particle properties
+    density:            []f32,
+    acceleration:       []render.float3,
+    velocity:           []render.float3,
+    position:           []render.float3,
+    color:              []render.float4,
+
+    // Pertaining to spatial hashing
+    particle_index:     []u32,
+    start_index:        []u32,
+    spatial_lookup:     []u32,
+
+    simulation_started: bool,
+}
 
 fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInstance{
 
@@ -20,8 +39,8 @@ fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInst
     shader := render.shader_module_create_from_file(renderer, "particle.slang.spv")
     defer render.shader_module_destroy(renderer, shader)
 
-    render.pipeline_cfg_add_shader(&pipeline_cfg, shader, { .VERTEX }, "vertex_main")
-    render.pipeline_cfg_add_shader(&pipeline_cfg, shader, { .FRAGMENT }, "fragment_main")
+    render.pipeline_cfg_add_shader(&pipeline_cfg, shader, { .VERTEX }, "billboard")
+    render.pipeline_cfg_add_shader(&pipeline_cfg, shader, { .FRAGMENT }, "render_quad_as_circle")
     render.pipeline_cfg_set_input_topology(&pipeline_cfg, .TRIANGLE_LIST)
     render.pipeline_cfg_set_polygon_mode(&pipeline_cfg, .FILL)
     render.pipeline_cfg_set_cull_mode(&pipeline_cfg, {}, .CLOCKWISE)
@@ -50,41 +69,71 @@ fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInst
     return material
 }
 
-fluidsim_set_init_particle_positions :: proc(renderer: ^render.Renderer, system: ^render.CPUParticleSystem, config: ^ParticleConfig) {
+fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, config: ^ParticleConfig) -> render.ParticleMotion {
+    state := new(FluidSimState)
+    state.system            = system
+    state.config            = config
+    state.color             = make([]render.float4, system.max_particles)
+    state.position          = make([]render.float3, system.max_particles)
+    state.velocity          = make([]render.float3, system.max_particles)
+    state.acceleration      = make([]render.float3, system.max_particles)
+    state.density           = make([]f32, system.max_particles)
+    state.particle_index    = make([]u32, system.max_particles)
+    state.spatial_lookup    = make([]u32, system.max_particles)
+    state.start_index       = make([]u32, system.max_particles)
+
+    return render.ParticleMotion{
+        data    = state,
+        update  = fluidsim_update_particles,
+        destroy = fluidsim_state_destroy,
+    }
+}
+
+fluidsim_state_destroy :: proc(data: rawptr) {
+    state := cast(^FluidSimState)data
+    delete(state.color)
+    delete(state.position)
+    delete(state.velocity)
+    delete(state.acceleration)
+    delete(state.density)
+    delete(state.particle_index)
+    delete(state.spatial_lookup)
+    delete(state.start_index)
+    free(state)
+}
+
+fluidsim_set_init_particle_positions :: proc(system: ^render.CPUParticleSystem, config: ParticleConfig) {
+    sim_state := cast(^FluidSimState)system.motion.data
 
     spacing := config.radius + config.spacing
     grid_size := int(math.ceil(math.sqrt(f32(system.particle_count))))
-    offset := [3]f32{ f32(-(grid_size - 1)) * 0.5 * spacing, f32(-(grid_size - 1)) * 0.5 * spacing, 0 }
+    offset := render.float3{ f32(-(grid_size - 1)) * 0.5 * spacing, f32(-(grid_size - 1)) * 0.5 * spacing, 0 }
 
     for i in 0..<system.particle_count {
         col := int(i) % grid_size
         row := int(i) / grid_size
-        system.particles[i].position = { f32(col) * spacing + offset.x, f32(row) * spacing + offset.y, 0 }
-        system.particles[i].color = config.default_color
-        system.particles[i].velocity = 0
+        sim_state.position[i]    = { f32(col) * spacing + offset.x, f32(row) * spacing + offset.y, 0 }
+        sim_state.color[i]       = config.default_color
+        system.particles[i].size = config.radius
     }
 }
 
-fluidsim_update_particles :: proc(system: ^render.CPUParticleSystem, renderer: ^render.Renderer, config: ^ParticleConfig, simulation_started: bool) {
+fluidsim_update_particles :: proc(system: ^render.CPUParticleSystem, dt: f32) {
+    sim_state := cast(^FluidSimState)system.motion.data
 
     // First, update the particle system with the new config info if it has changed while the program is running
-    system.particle_count = config.n_particles
+    system.particle_count = sim_state.config.n_particles
 
-    if !simulation_started {
-        fluidsim_set_init_particle_positions(renderer, system, config)
+    if !sim_state.simulation_started {
+        fluidsim_set_init_particle_positions(system, sim_state.config^)
     } else {
-
+        // TODO: Do the physics
     }
 
-    instanced_particles := make([]render.ParticleInstance, system.max_particles)
-    defer delete(instanced_particles)
-    // TODO: this is essentially doing a second copy for no reason. I should streamline getting relevant info to the shader.
-    //      1) Can I write directly into mapped memory?
-    //      2) Can I structure relevant particle data to just do the below buffer write?
     for i in 0..<system.particle_count {
-        instanced_particles[i] = {position = system.particles[i].position, size = config.radius, color = system.particles[i].color}
+        system.particles[i].position = sim_state.position[i]
+        system.particles[i].color    = sim_state.color[i]
     }
-    render.buffer_write_data(renderer, &system.particle_buffers[renderer.frame_index], raw_data(instanced_particles))
 }
 
 
