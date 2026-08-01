@@ -28,8 +28,19 @@ FluidSimState :: struct {
     start_index:        []u32,
     spatial_lookup:     []u32,
 
+    particle_count:     u32,
     simulation_started: bool,
 }
+
+FluidSimPhysicsConfig :: struct {
+    gravity:                  f32,
+	boundary_damping:         f32,
+	collision_damping:        f32,
+	density_smoothing_radius: f32,
+	pressure_constant:        f32,
+	rest_density:             f32,
+	n_substeps:               u32,
+};
 
 fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInstance{
 
@@ -71,16 +82,18 @@ fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInst
 
 fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, config: ^ParticleConfig) -> render.ParticleMotion {
     state := new(FluidSimState)
-    state.system            = system
-    state.config            = config
-    state.color             = make([]render.float4, system.max_particles)
-    state.position          = make([]render.float3, system.max_particles)
-    state.velocity          = make([]render.float3, system.max_particles)
-    state.acceleration      = make([]render.float3, system.max_particles)
-    state.density           = make([]f32, system.max_particles)
-    state.particle_index    = make([]u32, system.max_particles)
-    state.spatial_lookup    = make([]u32, system.max_particles)
-    state.start_index       = make([]u32, system.max_particles)
+    state.system             = system
+    state.config             = config
+    state.color              = make([]render.float4, system.max_particles)
+    state.position           = make([]render.float3, system.max_particles)
+    state.velocity           = make([]render.float3, system.max_particles)
+    state.acceleration       = make([]render.float3, system.max_particles)
+    state.density            = make([]f32, system.max_particles)
+    state.particle_index     = make([]u32, system.max_particles)
+    state.spatial_lookup     = make([]u32, system.max_particles)
+    state.start_index        = make([]u32, system.max_particles)
+    state.simulation_started = false
+    state.particle_count     = system.particle_count
 
     return render.ParticleMotion{
         data    = state,
@@ -122,12 +135,39 @@ fluidsim_update_particles :: proc(system: ^render.CPUParticleSystem, dt: f32) {
     sim_state := cast(^FluidSimState)system.motion.data
 
     // First, update the particle system with the new config info if it has changed while the program is running
-    system.particle_count = sim_state.config.n_particles
+    system.particle_count    = sim_state.config.n_particles
+    sim_state.particle_count = sim_state.config.n_particles
+    if sim_state.config.radius != system.particles[0].size {
+        for i in 0..<system.particle_count {
+            system.particles[i].size = sim_state.config.radius
+        }
+    }
 
     if !sim_state.simulation_started {
         fluidsim_set_init_particle_positions(system, sim_state.config^)
     } else {
         // TODO: Do the physics
+
+        // We should already have timing data, but may have to divide into substeps here
+
+        // update spatial lookup table
+        update_spatial_lookup(sim_state.position, )
+
+        // calculate particle densities
+
+        // get acceleration
+
+        // find k2 and l2
+
+        // update spatial lookup for 2nd particles array (should this happen?)
+
+        // calculate particle densities for 2nd particles array
+
+        // get acceleration (for 2nd particles array
+
+        // combine both particles array to get the next pos and vel
+
+        // resolve boundary collisions
     }
 
     for i in 0..<system.particle_count {
@@ -136,5 +176,12 @@ fluidsim_update_particles :: proc(system: ^render.CPUParticleSystem, dt: f32) {
     }
 }
 
-
+// Discretize space into an infinite grid. Populate the lookup table and sort it based on its hash value.
+@(private="file")
+update_spatial_lookup :: proc(positions: []render.float3, sim_state: ^FluidSimState, physics_config: ^FluidSimPhysicsConfig) {
+    for position, i in positions {
+        grid_cell_index := get_grid_cell(position, physics_config.density_smoothing_radius)
+        grid_cell_hash  := hash_grid_cell(grid_cell_index, sim_state.particle_count)
+    }
+}
 
