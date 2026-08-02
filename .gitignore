@@ -5,3 +5,7 @@ ols.json
 imgui.ini
 run
 *.cap
+
+# Test scaffolding: kept local-only, decoupled from feature branches
+/test/
+src/*test*.odin

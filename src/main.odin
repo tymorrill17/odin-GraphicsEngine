@@ -83,15 +83,19 @@ main :: proc() {
     fluid_material := fluidsim_get_material(&r)
     defer render.pipeline_destroy(&r, &fluid_material.pipeline)
 
-    particle_config := ParticleConfig{
+    particle_config := FluidSimParticleConfig{
         spacing         = 0.01,
         radius          = 0.1,
         n_particles     = 10000,
         default_color   = { 1, 1, 1, 1 },
     }
 
+    physics_config := FluidSimPhysicsConfig{
+
+    }
+
     fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
-    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config)
+    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config)
     defer render.particle_system_destroy(&fluidsim_particle_system, &r)
     fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
     append(&r.renderables, &fluidsim_render_object)
