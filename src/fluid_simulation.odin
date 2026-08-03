@@ -19,6 +19,7 @@ FluidSimState :: struct {
     system:             ^render.CPUParticleSystem,
     particle_cfg:       ^FluidSimParticleConfig,
     physics_cfg:        ^FluidSimPhysicsConfig,
+    bbox:               BoundingBox3D,
 
     // Particle properties
     density:            []f32,
@@ -46,6 +47,11 @@ FluidSimPhysicsConfig :: struct {
 	n_substeps:               u32,
 };
 
+BoundingBox3D :: struct {
+    min: render.float3,
+    max: render.float3,
+}
+
 @(private="file")
 GRID_CELL_OFFSETS: []render.int3 : {
     { -1, -1, -1 }, { -1, -1, 0 }, { -1, -1, 1 },
@@ -64,6 +70,7 @@ GRID_CELL_OFFSETS: []render.int3 : {
 NeighborhoodIterator :: struct {
     sim_state:              ^FluidSimState,
     position:               render.float3,
+    particle_positions:     [^]render.float3,
     grid_cell:              render.int3,
     smoothing_radius_sq:    f32,
     offset_idx:             int,
@@ -71,11 +78,12 @@ NeighborhoodIterator :: struct {
     grid_key:               u32,
 }
 
-neighborhood_iterator_make :: proc(sim_state: ^FluidSimState, position: render.float3) -> NeighborhoodIterator {
+neighborhood_iterator_make :: proc(sim_state: ^FluidSimState, position: render.float3, particle_positions: [^]render.float3) -> NeighborhoodIterator {
     radius := sim_state.physics_cfg.density_smoothing_radius
     return NeighborhoodIterator{
         sim_state           = sim_state,
         position            = position,
+        particle_positions  = particle_positions,
         grid_cell           = get_grid_cell(position, radius),
         smoothing_radius_sq = radius * radius,
         offset_idx          = -1,
@@ -104,7 +112,7 @@ neighborhood_iterator_next :: proc(it: ^NeighborhoodIterator) -> (dist: render.f
         particle_index = sim_state.particle_index[it.particle_idx]
         it.particle_idx += 1
 
-        dist = sim_state.position[particle_index] - it.position
+        dist = it.particle_positions[particle_index] - it.position
         square_dst := linalg.dot(dist, dist) // To avoid sqrt
         if square_dst <= it.smoothing_radius_sq {
             return dist, particle_index, true
@@ -173,7 +181,7 @@ fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInst
     return material
 }
 
-fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^FluidSimParticleConfig, physics_cfg: ^FluidSimPhysicsConfig) -> render.ParticleMotion {
+fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^FluidSimParticleConfig, physics_cfg: ^FluidSimPhysicsConfig, bounds: BoundingBox3D) -> render.ParticleMotion {
     state := new(FluidSimState)
     state.system             = system
     state.particle_cfg       = particle_cfg
@@ -188,6 +196,7 @@ fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^
     state.start_index        = make([]u32, system.max_particles)
     state.simulation_started = false
     state.particle_count     = system.particle_count
+    state.bbox               = bounds
 
     return render.ParticleMotion{
         data    = state,
@@ -225,6 +234,16 @@ fluidsim_set_init_particle_positions :: proc(system: ^render.CPUParticleSystem, 
     }
 }
 
+fluidsim_start :: proc(system: ^render.CPUParticleSystem) {
+    sim_state := cast(^FluidSimState)system.motion.data
+    sim_state.simulation_started = true;
+}
+
+fluidsim_reset :: proc(system: ^render.CPUParticleSystem) {
+    sim_state := cast(^FluidSimState)system.motion.data
+    sim_state.simulation_started = false
+}
+
 fluidsim_update_particles :: proc(system: ^render.CPUParticleSystem, dt: f32) {
     sim_state := cast(^FluidSimState)system.motion.data
 
@@ -236,6 +255,9 @@ fluidsim_update_particles :: proc(system: ^render.CPUParticleSystem, dt: f32) {
             system.particles[i].size = sim_state.particle_cfg.radius
         }
     }
+
+    assert(sim_state.physics_cfg.n_substeps != 0)
+    sub_dt := dt / f32(sim_state.physics_cfg.n_substeps)
 
     if !sim_state.simulation_started {
         fluidsim_set_init_particle_positions(system, sim_state.particle_cfg^)
@@ -254,16 +276,32 @@ fluidsim_update_particles :: proc(system: ^render.CPUParticleSystem, dt: f32) {
         calculate_all_accelerations(sim_state.position, sim_state.velocity, sim_state)
 
         // find k2 and l2
-
+        positions2 := make([]render.float3, sim_state.particle_count)
+        velocities2 := make([]render.float3, sim_state.particle_count)
+        l2 := make([]render.float3, sim_state.particle_count)
+        defer delete(positions2)
+        defer delete(velocities2)
+        defer delete(l2)
+        for i in 0..<sim_state.particle_count {
+            velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
+            positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocity[i] // TODO: Should I use velocity or velocities2?
+        }
         // update spatial lookup for 2nd particles array (should this happen?)
-
+        update_spatial_lookup(positions2, sim_state)
         // calculate particle densities for 2nd particles array
-
+        calculate_all_densities(positions2, sim_state)
         // get acceleration (for 2nd particles array
+        calculate_all_accelerations_to_array(positions2, velocities2, sim_state, &l2)
 
         // combine both particles array to get the next pos and vel
+        half_dt := dt * 0.5
+        for i in 0..<sim_state.particle_count {
+            sim_state.position[i] += half_dt * (sim_state.velocity[i] + velocities2[i])
+            sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + l2[i])
+        }
 
         // resolve boundary collisions
+        resolve_boundary_collisions(sim_state)
     }
 
     for i in 0..<system.particle_count {
@@ -306,9 +344,9 @@ update_spatial_lookup :: proc(positions: []render.float3, sim_state: ^FluidSimSt
     }
 
     // Sorts sim_state.spatial_lookup in place, and returns the permutation in indices
-    indices := slice.sort_with_indices(sim_state.spatial_lookup)
+    indices := slice.sort_with_indices(sim_state.spatial_lookup[:sim_state.particle_count])
     defer delete(indices)
-    slice.sort_by_indices_overwrite(sim_state.particle_index, indices) // Use the permutation to sort the particle_index array
+    slice.sort_by_indices_overwrite(sim_state.particle_index[:sim_state.particle_count], indices) // Use the permutation to sort the particle_index array
 
     // This loop updates the start indices
     for i in 0..<sim_state.particle_count {
@@ -321,10 +359,10 @@ update_spatial_lookup :: proc(positions: []render.float3, sim_state: ^FluidSimSt
 @(private="file")
 calculate_density :: proc(particle_idx: u32, particle_positions: []render.float3, sim_state: ^FluidSimState) -> f32 {
     density: f32 = 0.0
-    iter := neighborhood_iterator_make(sim_state, particle_positions[particle_idx])
+    iter := neighborhood_iterator_make(sim_state, particle_positions[particle_idx], raw_data(particle_positions))
     for dist, _, ok := neighborhood_iterator_next(&iter); ok; dist, _, ok = neighborhood_iterator_next(&iter) {
         dist_sq := linalg.dot(dist, dist)
-        density += kernel_smooth(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
+        density += kernel_smooth_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
     }
     assert(density != 0)
     return density
@@ -354,6 +392,12 @@ calculate_all_accelerations :: proc(particle_positions, particle_velocities: []r
         sim_state.acceleration[i] = calculate_acceleration(i, particle_positions, particle_velocities, sim_state)
     }
 }
+@(private="file")
+calculate_all_accelerations_to_array :: proc(particle_positions, particle_velocities: []render.float3, sim_state: ^FluidSimState, out_accel: ^[]render.float3) {
+    for i in 0..<u32(len(out_accel)) {
+        out_accel[i] = calculate_acceleration(i, particle_positions, particle_velocities, sim_state)
+    }
+}
 
 @(private="file")
 get_pressure :: proc(density: f32, sim_state: ^FluidSimState) -> f32 {
@@ -367,6 +411,7 @@ get_shared_pressure :: proc(density, other_density: f32, sim_state: ^FluidSimSta
     return (pressure + other_pressure) * 0.5
 }
 
+@(private="file")
 get_random_dir :: proc() -> render.float3 {
     dir: render.float3
     length_sq: f32
@@ -379,31 +424,46 @@ get_random_dir :: proc() -> render.float3 {
         length_sq = linalg.dot(dir, dir)
         if length_sq > 0 do break
     }
-    return dir / length_sq
+    return dir / math.sqrt(length_sq)
 }
 
 @(private="file")
 calculate_pressure_force :: proc(particle_idx: u32, particle_positions: []render.float3, densities: []f32, sim_state: ^FluidSimState) -> render.float3 {
     force := render.float3{ 0, 0, 0 }
-    iter := neighborhood_iterator_make(sim_state, particle_positions[particle_idx])
+    iter := neighborhood_iterator_make(sim_state, particle_positions[particle_idx], raw_data(particle_positions))
     for dist, index, ok := neighborhood_iterator_next(&iter); ok; dist, index, ok = neighborhood_iterator_next(&iter) {
         if (index == particle_idx) do continue // Particle does not contribute to its own pressure force
         dist_sq := linalg.dot(dist, dist)
         dir := dist_sq == 0 ? get_random_dir() : dist / linalg.length(dist) // If particles occupy the same location, select a random force direction
 
-        force += get_shared_pressure(densities[particle_idx], densities[index], sim_state) * dir * kernel_spikey(dist_sq, sim_state.physics_cfg.density_smoothing_radius) / densities[index]
+        force += get_shared_pressure(densities[particle_idx], densities[index], sim_state) * dir * kernel_spikey_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius) / densities[index]
     }
     return force
 }
 
+@(private="file")
+resolve_boundary_collisions :: proc(sim_state: ^FluidSimState) {
+    for i in 0..<sim_state.particle_count {
+        for dim in 0..<3 {
+            if sim_state.position[i][dim] > (sim_state.bbox.max[dim] - sim_state.particle_cfg.radius) {
+                sim_state.position[i][dim] = sim_state.bbox.max[dim] - sim_state.particle_cfg.radius
+                sim_state.velocity[i][dim] = -sim_state.velocity[i][dim] * sim_state.physics_cfg.boundary_damping
+            } else if sim_state.position[i][dim] < (sim_state.bbox.min[dim] + sim_state.particle_cfg.radius) {
+                sim_state.position[i][dim] = sim_state.bbox.min[dim] + sim_state.particle_cfg.radius
+                sim_state.velocity[i][dim] = -sim_state.velocity[i][dim] * sim_state.physics_cfg.boundary_damping
+            }
+        }
+    }
+}
+
 // TODO: This is currently 2D. Need to make this 3D
-kernel_smooth :: proc(dist_sq: f32, radius: f32) -> f32 {
+kernel_smooth_2D :: proc(dist_sq: f32, radius: f32) -> f32 {
     radius_sq := radius * radius
     if dist_sq > radius_sq do return 0
     return 4 / (math.PI * math.pow(radius, 8)) * math.pow(radius_sq - dist_sq, 2)
 }
 
-kernel_spikey :: proc(dist_sq: f32, radius: f32) -> f32 {
+kernel_spikey_2D :: proc(dist_sq: f32, radius: f32) -> f32 {
     r := math.sqrt(dist_sq)
     if r > radius do return 0
     return 10 / (math.PI * math.pow(radius, 5)) * math.pow(radius - r, 3)

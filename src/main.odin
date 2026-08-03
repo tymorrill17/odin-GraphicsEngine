@@ -86,16 +86,27 @@ main :: proc() {
     particle_config := FluidSimParticleConfig{
         spacing         = 0.01,
         radius          = 0.1,
-        n_particles     = 10000,
+        n_particles     = 100,
         default_color   = { 1, 1, 1, 1 },
     }
 
     physics_config := FluidSimPhysicsConfig{
+        gravity                     = 9.8,
+        boundary_damping            = 0.9,
+        collision_damping           = 0.9,
+        density_smoothing_radius    = 0.3,
+        pressure_constant           = 20,
+        rest_density                = 5,
+        n_substeps                  = 1,
+    }
 
+    bounding_box := BoundingBox3D{
+        max = {  1,  1,  1 },
+        min = { -1, -1, -1 },
     }
 
     fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
-    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config)
+    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, bounding_box)
     defer render.particle_system_destroy(&fluidsim_particle_system, &r)
     fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
     append(&r.renderables, &fluidsim_render_object)
@@ -124,8 +135,27 @@ main :: proc() {
 		imgui.Begin("Particle Config");
         imgui.DragFloat("Spacing", &particle_config.spacing, 0.01);
         imgui.DragFloat("Radius", &particle_config.radius, .01);
-        imgui.DragScalar("Number of Particles", .U32, rawptr(&particle_config.n_particles), .01);
+        imgui.DragScalar("Number of Particles", .U32, rawptr(&particle_config.n_particles), 1);
         imgui.ColorPicker4("Default Color", &particle_config.default_color)
+		imgui.End();
+
+		imgui.Begin("Physics Config");
+        imgui.DragFloat("Gravity", &physics_config.gravity, 0.01);
+        imgui.DragFloat("Boundary Damping Factor", &physics_config.boundary_damping, 0.01);
+        imgui.DragFloat("Collision Damping Factor", &physics_config.collision_damping, 0.01);
+        imgui.DragFloat("Smoothing Radius", &physics_config.density_smoothing_radius, 0.01, v_min = 0.1);
+        imgui.DragFloat("Pressure Constant", &physics_config.pressure_constant, 0.01);
+        imgui.DragFloat("Rest Density", &physics_config.rest_density, 0.01);
+        imgui.DragScalar("Substeps", .U32, rawptr(&physics_config.n_substeps), 1);
+		imgui.End();
+
+		imgui.Begin("Controls");
+        if imgui.Button("Start") {
+            fluidsim_start(&fluidsim_particle_system)
+        }
+        if imgui.Button("Reset") {
+            fluidsim_reset(&fluidsim_particle_system)
+        }
 		imgui.End();
 
         aspect_ratio := r.window.aspect_ratio
