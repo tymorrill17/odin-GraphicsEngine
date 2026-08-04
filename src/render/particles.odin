@@ -12,6 +12,7 @@ ParticleInstance :: struct {
 
 ParticleMotion :: struct {
     data:       rawptr,
+    started:    bool,
     update:     proc(system: ^CPUParticleSystem, dt: f32),
     destroy:    proc(data: rawptr), // optional, for freeing motion-specific buffers
 }

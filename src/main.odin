@@ -100,17 +100,6 @@ main :: proc() {
         n_substeps                  = 1,
     }
 
-    bounding_box := BoundingBox3D{
-        max = {  1,  1,  1 },
-        min = { -1, -1, -1 },
-    }
-
-    fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
-    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, bounding_box)
-    defer render.particle_system_destroy(&fluidsim_particle_system, &r)
-    fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
-    append(&r.renderables, &fluidsim_render_object)
-
     camera_config := CameraConfig{
         center      = {0, 0, 0},
         position    = {0, 0, 1},
@@ -118,6 +107,21 @@ main :: proc() {
         far_plane   = 10000,
         scale       = 5,
     };
+
+    half_width  := r.window.aspect_ratio * camera_config.scale * 0.5
+    half_height := camera_config.scale * 0.5
+
+    bounding_box := BoundingBox2D{
+        min = { -half_width, -half_height },
+        max = {  half_width,  half_height },
+    }
+
+    fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
+    // Dimension of the particle motion inferred from bounding box dimension
+    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, bounding_box)
+    defer render.particle_system_destroy(&fluidsim_particle_system, &r)
+    fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
+    append(&r.renderables, &fluidsim_render_object)
 
     physics_dt: f32 = 1.0 / 60
 
@@ -146,15 +150,18 @@ main :: proc() {
         imgui.DragFloat("Smoothing Radius", &physics_config.density_smoothing_radius, 0.01, v_min = 0.1);
         imgui.DragFloat("Pressure Constant", &physics_config.pressure_constant, 0.01);
         imgui.DragFloat("Rest Density", &physics_config.rest_density, 0.01);
-        imgui.DragScalar("Substeps", .U32, rawptr(&physics_config.n_substeps), 1);
+        {
+            min: u32 = 1
+            imgui.DragScalar("Substeps", .U32, rawptr(&physics_config.n_substeps), 1, &min);
+        }
 		imgui.End();
 
 		imgui.Begin("Controls");
         if imgui.Button("Start") {
-            fluidsim_start(&fluidsim_particle_system)
+            fluidsim_particle_system.motion.started = true
         }
         if imgui.Button("Reset") {
-            fluidsim_reset(&fluidsim_particle_system)
+            fluidsim_particle_system.motion.started = false
         }
 		imgui.End();
 
