@@ -23,6 +23,8 @@ FluidSimPhysicsConfig :: struct {
 	pressure_constant:        f32,
 	rest_density:             f32,
 	n_substeps:               u32,
+    time_step:                f32,
+    max_time_step:            f32,
 };
 
 FluidSimState :: struct($N: int) {
@@ -44,6 +46,7 @@ FluidSimState :: struct($N: int) {
     spatial_lookup:     []u32,
 
     particle_count:     u32,
+    accumulated_time:   f32,
 }
 
 NeighborhoodIterator :: struct($N: int) {
@@ -119,6 +122,7 @@ fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^
     state.start_index        = make([]u32, system.max_particles)
     state.particle_count     = system.particle_count
     state.bbox               = bounds
+    state.accumulated_time   = 0
 
     when N == 2 {
         return render.ParticleMotion{ data = state, started = false, update = fluidsim_update_particles_2d, destroy = fluidsim_state_destroy_2d }
@@ -200,48 +204,53 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
     }
 
     assert(sim_state.physics_cfg.n_substeps != 0)
-    sub_dt := dt / f32(sim_state.physics_cfg.n_substeps)
 
     if !system.motion.started {
+        sim_state.accumulated_time = 0
         fluidsim_set_init_particle_positions(system, sim_state, sim_state.particle_cfg^)
     } else {
-        for _ in 0..<sim_state.physics_cfg.n_substeps {
-            // update spatial lookup table
-            update_spatial_lookup(sim_state.position, sim_state)
+        sim_state.accumulated_time += math.min(dt, sim_state.physics_cfg.max_time_step)
+        for sim_state.accumulated_time >= sim_state.physics_cfg.time_step {
+            sub_dt := sim_state.physics_cfg.time_step / f32(sim_state.physics_cfg.n_substeps)
+            for _ in 0..<sim_state.physics_cfg.n_substeps {
+                // update spatial lookup table
+                update_spatial_lookup(sim_state.position, sim_state)
 
-            // calculate particle densities
-            calculate_all_densities(sim_state.position, sim_state)
+                // calculate particle densities
+                calculate_all_densities(sim_state.position, sim_state)
 
-            // get acceleration
-            calculate_all_accelerations(sim_state.position, sim_state.velocity, sim_state)
+                // get acceleration
+                calculate_all_accelerations(sim_state.position, sim_state.velocity, sim_state)
 
-            // find k2 and l2
-            positions2 := make([][N]f32, sim_state.particle_count)
-            velocities2 := make([][N]f32, sim_state.particle_count)
-            l2 := make([][N]f32, sim_state.particle_count)
-            defer delete(positions2)
-            defer delete(velocities2)
-            defer delete(l2)
-            for i in 0..<sim_state.particle_count {
-                velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
-                positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocity[i] // TODO: Should I use velocity or velocities2?
+                // find k2 and l2
+                positions2 := make([][N]f32, sim_state.particle_count)
+                velocities2 := make([][N]f32, sim_state.particle_count)
+                l2 := make([][N]f32, sim_state.particle_count)
+                defer delete(positions2)
+                defer delete(velocities2)
+                defer delete(l2)
+                for i in 0..<sim_state.particle_count {
+                    velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
+                    positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocity[i] // TODO: Should I use velocity or velocities2?
+                }
+                // update spatial lookup for 2nd particles array (should this happen?)
+                update_spatial_lookup(positions2, sim_state)
+                // calculate particle densities for 2nd particles array
+                calculate_all_densities(positions2, sim_state)
+                // get acceleration (for 2nd particles array
+                calculate_all_accelerations_to_array(positions2, velocities2, sim_state, &l2)
+
+                // combine both particles array to get the next pos and vel
+                half_dt := sub_dt * 0.5
+                for i in 0..<sim_state.particle_count {
+                    sim_state.position[i] += half_dt * (sim_state.velocity[i] + velocities2[i])
+                    sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + l2[i])
+                }
+
+                // resolve boundary collisions
+                resolve_boundary_collisions(sim_state)
             }
-            // update spatial lookup for 2nd particles array (should this happen?)
-            update_spatial_lookup(positions2, sim_state)
-            // calculate particle densities for 2nd particles array
-            calculate_all_densities(positions2, sim_state)
-            // get acceleration (for 2nd particles array
-            calculate_all_accelerations_to_array(positions2, velocities2, sim_state, &l2)
-
-            // combine both particles array to get the next pos and vel
-            half_dt := sub_dt * 0.5
-            for i in 0..<sim_state.particle_count {
-                sim_state.position[i] += half_dt * (sim_state.velocity[i] + velocities2[i])
-                sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + l2[i])
-            }
-
-            // resolve boundary collisions
-            resolve_boundary_collisions(sim_state)
+            sim_state.accumulated_time -= sim_state.physics_cfg.time_step
         }
     }
 

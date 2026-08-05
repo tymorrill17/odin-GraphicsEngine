@@ -76,7 +76,7 @@ particle_system_update :: proc(system: ^CPUParticleSystem, renderer: ^Renderer, 
     if system.motion.update != nil {
         system.motion.update(system, dt)
     }
-    buffer_write_data(renderer, &system.particle_buffers[renderer.frame_index], raw_data(system.particles))
+    buffer_write_data(renderer, &system.particle_buffers[renderer.frame_index], raw_data(system.particles), size = u64(system.particle_count) * size_of(ParticleInstance))
     system.current_particle_buffer_addr = &system.particle_buffer_addrs[renderer.frame_index]
 }
 

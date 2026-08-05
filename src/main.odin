@@ -4,6 +4,7 @@ import "thirdparty:imgui"
 import vk "vendor:vulkan"
 import "render"
 import "core:log"
+import "core:math"
 
 APPLICATION_WIDTH  :: 1920
 APPLICATION_HEIGHT :: 1080
@@ -98,6 +99,8 @@ main :: proc() {
         pressure_constant           = 20,
         rest_density                = 5,
         n_substeps                  = 1,
+        time_step                   = 1.0 / 60.0,
+        max_time_step               = .25
     }
 
     camera_config := CameraConfig{
@@ -123,10 +126,11 @@ main :: proc() {
     fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
     append(&r.renderables, &fluidsim_render_object)
 
-    physics_dt: f32 = 1.0 / 60
+    timer := render.timer_create()
 
     for !render.window_should_close(&r) {
         render.start_frame(&r)
+        render.timer_update(&timer)
 
 		imgui.Begin("Camera Config");
         imgui.DragFloat3("Position", &camera_config.position, 0.1);
@@ -150,6 +154,7 @@ main :: proc() {
         imgui.DragFloat("Smoothing Radius", &physics_config.density_smoothing_radius, 0.01, v_min = 0.1);
         imgui.DragFloat("Pressure Constant", &physics_config.pressure_constant, 0.01);
         imgui.DragFloat("Rest Density", &physics_config.rest_density, 0.01);
+        imgui.DragFloat("Time Step", &physics_config.time_step, .0166, v_min = 0);
         {
             min: u32 = 1
             imgui.DragScalar("Substeps", .U32, rawptr(&physics_config.n_substeps), 1, &min);
@@ -165,6 +170,11 @@ main :: proc() {
         }
 		imgui.End();
 
+		imgui.Begin("Metrics");
+        imgui.Text("FPS: %f", timer.fps)
+        imgui.Text("Frame Time: %f", timer.avg_frame_time)
+		imgui.End();
+
         aspect_ratio := r.window.aspect_ratio
         up := render.float3{ 0, 1, 0 }
         camera_data.proj = render.projection_set_orthographic(-aspect_ratio * 0.5 * camera_config.scale, aspect_ratio * 0.5 * camera_config.scale,
@@ -175,7 +185,7 @@ main :: proc() {
         render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame
 
         // Update fluidsim particles
-        render.particle_system_update(&fluidsim_particle_system, &r, physics_dt)
+        render.particle_system_update(&fluidsim_particle_system, &r, timer.frame_time)
 
         render.draw(&r)
     }
