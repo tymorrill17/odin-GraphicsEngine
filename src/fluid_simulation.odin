@@ -3,6 +3,10 @@ package main
 import "render"
 import "core:math"
 import "core:slice"
+import "core:thread"
+import "base:runtime"
+import "core:mem"
+import "core:os"
 import "core:math/linalg"
 import "core:math/rand"
 
@@ -17,12 +21,12 @@ FluidSimParticleConfig :: struct {
 
 FluidSimPhysicsConfig :: struct {
     gravity:                  f32,
-	boundary_damping:         f32,
-	collision_damping:        f32,
-	density_smoothing_radius: f32,
-	pressure_constant:        f32,
-	rest_density:             f32,
-	n_substeps:               u32,
+    boundary_damping:         f32,
+    collision_damping:        f32,
+    density_smoothing_radius: f32,
+    pressure_constant:        f32,
+    rest_density:             f32,
+    n_substeps:               u32,
     time_step:                f32,
     max_time_step:            f32,
 };
@@ -44,6 +48,11 @@ FluidSimState :: struct($N: int) {
     particle_index:     []u32,
     start_index:        []u32,
     spatial_lookup:     []u32,
+
+    // Extra needed quantities
+    positions2:         [][N]f32,
+    velocities2:        [][N]f32,
+    l2:                 [][N]f32,
 
     particle_count:     u32,
     accumulated_time:   f32,
@@ -124,6 +133,10 @@ fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^
     state.bbox               = bounds
     state.accumulated_time   = 0
 
+    state.positions2         = make([][N]f32, system.max_particles)
+    state.velocities2        = make([][N]f32, system.max_particles)
+    state.l2                 = make([][N]f32, system.max_particles)
+
     when N == 2 {
         return render.ParticleMotion{ data = state, started = false, update = fluidsim_update_particles_2d, destroy = fluidsim_state_destroy_2d }
     } else when N == 3 {
@@ -153,6 +166,11 @@ fluidsim_state_destroy :: proc($N: int, data: rawptr) {
     delete(state.particle_index)
     delete(state.spatial_lookup)
     delete(state.start_index)
+
+    delete(state.positions2)
+    delete(state.velocities2)
+    delete(state.l2)
+
     free(state)
 }
 
@@ -223,28 +241,22 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
                 calculate_all_accelerations(sim_state.position, sim_state.velocity, sim_state)
 
                 // find k2 and l2
-                positions2 := make([][N]f32, sim_state.particle_count)
-                velocities2 := make([][N]f32, sim_state.particle_count)
-                l2 := make([][N]f32, sim_state.particle_count)
-                defer delete(positions2)
-                defer delete(velocities2)
-                defer delete(l2)
                 for i in 0..<sim_state.particle_count {
-                    velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
-                    positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocity[i] // TODO: Should I use velocity or velocities2?
+                    sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
+                    sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocity[i] // TODO: Should I use velocity or velocities2?
                 }
                 // update spatial lookup for 2nd particles array (should this happen?)
-                update_spatial_lookup(positions2, sim_state)
+                update_spatial_lookup(sim_state.positions2, sim_state)
                 // calculate particle densities for 2nd particles array
-                calculate_all_densities(positions2, sim_state)
+                calculate_all_densities(sim_state.positions2, sim_state)
                 // get acceleration (for 2nd particles array
-                calculate_all_accelerations_to_array(positions2, velocities2, sim_state, &l2)
+                calculate_all_accelerations_to_array(sim_state.positions2, sim_state.velocities2, sim_state, sim_state.l2)
 
                 // combine both particles array to get the next pos and vel
                 half_dt := sub_dt * 0.5
                 for i in 0..<sim_state.particle_count {
-                    sim_state.position[i] += half_dt * (sim_state.velocity[i] + velocities2[i])
-                    sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + l2[i])
+                    sim_state.position[i] += half_dt * (sim_state.velocity[i] + sim_state.velocities2[i])
+                    sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + sim_state.l2[i])
                 }
 
                 // resolve boundary collisions
@@ -356,8 +368,8 @@ calculate_all_accelerations :: proc(particle_positions, particle_velocities: [][
     }
 }
 @(private="file")
-calculate_all_accelerations_to_array :: proc(particle_positions, particle_velocities: [][$N]f32, sim_state: ^FluidSimState(N), out_accel: ^[][N]f32) {
-    for i in 0..<u32(len(out_accel)) {
+calculate_all_accelerations_to_array :: proc(particle_positions, particle_velocities: [][$N]f32, sim_state: ^FluidSimState(N), out_accel: [][N]f32) {
+    for i in 0..<sim_state.particle_count {
         out_accel[i] = calculate_acceleration(i, particle_positions, particle_velocities, sim_state)
     }
 }
