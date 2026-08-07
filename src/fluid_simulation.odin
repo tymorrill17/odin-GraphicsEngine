@@ -37,6 +37,10 @@ FluidSimState :: struct($N: int) {
     physics_cfg:        ^FluidSimPhysicsConfig,
     bbox:               BoundingBox(N),
 
+    // Thread objects
+    n_workers:          int,
+    worker_pool:        thread.Pool,
+
     // Particle properties
     density:            []f32,
     acceleration:       [][N]f32,
@@ -136,6 +140,10 @@ fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^
     state.positions2         = make([][N]f32, system.max_particles)
     state.velocities2        = make([][N]f32, system.max_particles)
     state.l2                 = make([][N]f32, system.max_particles)
+
+    state.n_workers = os.get_processor_core_count()
+    thread.pool_init(&state.worker_pool, allocator = runtime.heap_allocator(), thread_count = state.n_workers)
+    thread.pool_start(&state.worker_pool)
 
     when N == 2 {
         return render.ParticleMotion{ data = state, started = false, update = fluidsim_update_particles_2d, destroy = fluidsim_state_destroy_2d }
@@ -243,7 +251,7 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
                 // find k2 and l2
                 for i in 0..<sim_state.particle_count {
                     sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
-                    sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocity[i] // TODO: Should I use velocity or velocities2?
+                    sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i] // TODO: Should I use velocity or velocities2?
                 }
                 // update spatial lookup for 2nd particles array (should this happen?)
                 update_spatial_lookup(sim_state.positions2, sim_state)
@@ -255,8 +263,8 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
                 // combine both particles array to get the next pos and vel
                 half_dt := sub_dt * 0.5
                 for i in 0..<sim_state.particle_count {
-                    sim_state.position[i] += half_dt * (sim_state.velocity[i] + sim_state.velocities2[i])
                     sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + sim_state.l2[i])
+                    sim_state.position[i] += half_dt * (sim_state.velocity[i] + sim_state.velocities2[i])
                 }
 
                 // resolve boundary collisions
@@ -323,6 +331,19 @@ update_spatial_lookup :: proc(positions: [][$N]f32, sim_state: ^FluidSimState(N)
 }
 
 @(private="file")
+pool_wait_batch :: proc(pool: ^thread.Pool) {
+    // The calling thread pulls tasks too
+    for task in thread.pool_pop_waiting(pool) {
+        thread.pool_do_work(pool, task)
+    }
+    for thread.pool_num_outstanding(pool) > 0 {
+        thread.yield()
+    }
+    // pool_do_work() appends finished tasks to pool.tasks_done
+    for _ in thread.pool_pop_done(pool) { }
+}
+
+@(private="file")
 calculate_density :: proc(particle_idx: u32, particle_positions: [][$N]f32, sim_state: ^FluidSimState(N)) -> f32 {
     density: f32 = 0.0
     iter := neighborhood_iterator_make(sim_state, particle_positions[particle_idx], raw_data(particle_positions))
@@ -341,6 +362,12 @@ calculate_density :: proc(particle_idx: u32, particle_positions: [][$N]f32, sim_
 
 @(private="file")
 calculate_all_densities :: proc(particle_positions: [][$N]f32, sim_state: ^FluidSimState(N)) {
+    for i in 0..<sim_state.particle_count {
+        sim_state.density[i] = calculate_density(i, particle_positions, sim_state)
+    }
+}
+
+calculate_all_densities_parallel :: proc(particle_positions: [][$N]f32, sim_state: ^FluidSimState(N)) {
     for i in 0..<sim_state.particle_count {
         sim_state.density[i] = calculate_density(i, particle_positions, sim_state)
     }
