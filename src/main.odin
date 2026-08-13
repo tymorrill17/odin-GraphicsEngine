@@ -6,8 +6,8 @@ import "render"
 import "core:log"
 import "core:math"
 
-APPLICATION_WIDTH  :: 1920
-APPLICATION_HEIGHT :: 1080
+APPLICATION_WIDTH  :: 2560
+APPLICATION_HEIGHT :: 1440
 
 requested_validation_layers : []cstring : {
     "VK_LAYER_KHRONOS_validation", // Standard validation layer preset
@@ -100,7 +100,9 @@ main :: proc() {
         rest_density                = 5,
         n_substeps                  = 1,
         time_step                   = 1.0 / 60.0,
-        max_time_step               = .25
+        max_time_step               = .25,
+        interaction_strength        = 20,
+        interaction_radius          = 1,
     }
 
     camera_config := CameraConfig{
@@ -120,8 +122,8 @@ main :: proc() {
     }
 
     fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
-    // Dimension of the particle motion inferred from bounding box dimension
-    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, bounding_box)
+    // Dimension of the particle motion is inferred from bounding box dimension
+    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, bounding_box, &r.input, &camera_data)
     defer render.particle_system_destroy(&fluidsim_particle_system, &r)
     fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
     append(&r.renderables, &fluidsim_render_object)
@@ -155,6 +157,8 @@ main :: proc() {
         imgui.DragFloat("Pressure Constant", &physics_config.pressure_constant, 0.01);
         imgui.DragFloat("Rest Density", &physics_config.rest_density, 0.01);
         imgui.DragFloat("Time Step", &physics_config.time_step, .0166, v_min = 0);
+        imgui.DragFloat("Interaction Strength", &physics_config.interaction_strength, 0.1);
+        imgui.DragFloat("Interaction Radius", &physics_config.interaction_radius, 0.01, v_min = 0);
         {
             min: u32 = 1
             imgui.DragScalar("Substeps", .U32, rawptr(&physics_config.n_substeps), 1, &min);
@@ -173,6 +177,11 @@ main :: proc() {
 		imgui.Begin("Metrics");
         imgui.Text("FPS: %f", timer.fps)
         imgui.Text("Frame Time: %f", timer.avg_frame_time)
+        {
+            mouse_world := render.mouse_world_position_from_viewproj(&r.input, camera_data.viewproj)
+            imgui.Text("Mouse Screen: %.1f, %.1f", r.input.mouse_position.x, r.input.mouse_position.y)
+            imgui.Text("Mouse World: %.3f, %.3f", mouse_world.x, mouse_world.y)
+        }
 		imgui.End();
 
         aspect_ratio := r.window.aspect_ratio

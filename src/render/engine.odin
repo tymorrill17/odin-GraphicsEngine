@@ -68,6 +68,7 @@ RendererConfig :: struct {
 
 Renderer :: struct {
     window:                     Window,
+    input:                      Input,
     instance:                   vk.Instance,
     debug_messenger:            vk.DebugUtilsMessengerEXT,
     logical_device:             vk.Device,
@@ -269,6 +270,7 @@ start_frame :: proc(renderer: ^Renderer) {
     poll_events()
     resize_callback(renderer)
     gui_start_frame()
+    input_update(renderer)
 }
 
 draw :: proc(renderer: ^Renderer) {
