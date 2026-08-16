@@ -34,42 +34,46 @@ FluidSimPhysicsConfig :: struct {
 };
 
 FluidSimState :: struct($N: int) {
-    system:             ^render.CPUParticleSystem,
-    particle_cfg:       ^FluidSimParticleConfig,
-    physics_cfg:        ^FluidSimPhysicsConfig,
-    bbox:               BoundingBox(N),
+    system:                 ^render.CPUParticleSystem,
+    particle_cfg:           ^FluidSimParticleConfig,
+    physics_cfg:            ^FluidSimPhysicsConfig,
+    bbox:                   BoundingBox(N),
 
     // Mouse interaction
-    input:              ^render.Input,
-    camera:             ^CameraData,
-    mouse_position:     [N]f32,
-    mouse_captured:     bool,
-    mouse_left_down:    bool,
-    mouse_right_down:   bool,
+    input:                  ^render.Input,
+    camera:                 ^CameraData,
+    mouse_position:         [N]f32,
+    mouse_captured:         bool,
+    mouse_left_down:        bool,
+    mouse_right_down:       bool,
 
     // Thread objects
-    n_workers:          int,
-    worker_pool:        thread.Pool,
+    n_workers:              int,
+    worker_pool:            thread.Pool,
 
     // Particle properties
-    density:            []f32,
-    acceleration:       [][N]f32,
-    velocity:           [][N]f32,
-    position:           [][N]f32,
-    color:              []render.float4,
+    density:                []f32,
+    acceleration:           [][N]f32,
+    velocity:               [][N]f32,
+    position:               [][N]f32,
+    color:                  []render.float4,
 
     // Pertaining to spatial hashing
-    particle_index:     []u32,
-    start_index:        []u32,
-    spatial_lookup:     []u32,
+    cell_particle_count:    []u32,
+    cell_prefix_sum:        []u32,
+    spatial_lookup:         []u32,
+    sorted_particle_index:  []u32,
+
+    hash_size:              u32, // Must be a power of 2
+    hash_mask:              u32, // hash_size - 1
 
     // Extra needed quantities
-    positions2:         [][N]f32,
-    velocities2:        [][N]f32,
-    l2:                 [][N]f32,
+    positions2:             [][N]f32,
+    velocities2:            [][N]f32,
+    l2:                     [][N]f32,
 
-    particle_count:     u32,
-    accumulated_time:   f32,
+    particle_count:         u32,
+    accumulated_time:       f32,
 }
 
 NeighborhoodIterator :: struct($N: int) {
@@ -80,8 +84,8 @@ NeighborhoodIterator :: struct($N: int) {
     smoothing_radius_sq:    f32,
     offset_idx:             int,
     offset_count:           int,
-    particle_idx:           u32,
-    grid_key:               u32,
+    sorted_slot:            u32,
+    sorted_slot_end:        u32,
 }
 
 BoundingBox :: struct($N: int) {
@@ -132,27 +136,31 @@ fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInst
 
 fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^FluidSimParticleConfig, physics_cfg: ^FluidSimPhysicsConfig,
     bounds: BoundingBox($N), input: ^render.Input, camera: ^CameraData) -> render.ParticleMotion {
-    state := new(FluidSimState(N))
-    state.system             = system
-    state.particle_cfg       = particle_cfg
-    state.physics_cfg        = physics_cfg
-    state.input              = input
-    state.camera             = camera
-    state.color              = make([]render.float4, system.max_particles)
-    state.position           = make([][N]f32, system.max_particles)
-    state.velocity           = make([][N]f32, system.max_particles)
-    state.acceleration       = make([][N]f32, system.max_particles)
-    state.density            = make([]f32, system.max_particles)
-    state.particle_index     = make([]u32, system.max_particles)
-    state.spatial_lookup     = make([]u32, system.max_particles)
-    state.start_index        = make([]u32, system.max_particles)
-    state.particle_count     = system.particle_count
-    state.bbox               = bounds
-    state.accumulated_time   = 0
 
-    state.positions2         = make([][N]f32, system.max_particles)
-    state.velocities2        = make([][N]f32, system.max_particles)
-    state.l2                 = make([][N]f32, system.max_particles)
+    state := new(FluidSimState(N))
+    state.system                = system
+    state.particle_cfg          = particle_cfg
+    state.physics_cfg           = physics_cfg
+    state.input                 = input
+    state.camera                = camera
+    state.color                 = make([]render.float4, system.max_particles)
+    state.position              = make([][N]f32, system.max_particles)
+    state.velocity              = make([][N]f32, system.max_particles)
+    state.acceleration          = make([][N]f32, system.max_particles)
+    state.density               = make([]f32, system.max_particles)
+    state.spatial_lookup        = make([]u32, system.max_particles)
+    state.sorted_particle_index = make([]u32, system.max_particles)
+
+    max_hash := get_hash_size(system.max_particles)
+    state.cell_particle_count   = make([]u32, max_hash)
+    state.cell_prefix_sum       = make([]u32, max_hash + 1)
+    state.particle_count        = system.particle_count
+    state.bbox                  = bounds
+    state.accumulated_time      = 0
+
+    state.positions2            = make([][N]f32, system.max_particles)
+    state.velocities2           = make([][N]f32, system.max_particles)
+    state.l2                    = make([][N]f32, system.max_particles)
 
     state.n_workers = os.get_processor_core_count()
     thread.pool_init(&state.worker_pool, allocator = runtime.heap_allocator(), thread_count = state.n_workers)
@@ -184,9 +192,10 @@ fluidsim_state_destroy :: proc($N: int, data: rawptr) {
     delete(state.velocity)
     delete(state.acceleration)
     delete(state.density)
-    delete(state.particle_index)
+    delete(state.cell_particle_count)
+    delete(state.cell_prefix_sum)
     delete(state.spatial_lookup)
-    delete(state.start_index)
+    delete(state.sorted_particle_index)
 
     delete(state.positions2)
     delete(state.velocities2)
@@ -257,6 +266,8 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
     // Update the particle system with the new config info if it has changed while the program is running
     system.particle_count    = sim_state.particle_cfg.n_particles
     sim_state.particle_count = sim_state.particle_cfg.n_particles
+    sim_state.hash_size      = get_hash_size(sim_state.particle_count)
+    sim_state.hash_mask      = sim_state.hash_size - 1
     if sim_state.particle_cfg.radius != system.particles[0].size {
         for i in 0..<system.particle_count {
             system.particles[i].size = sim_state.particle_cfg.radius
@@ -329,38 +340,71 @@ get_grid_cell :: proc(position: [$N]f32, cell_size: f32) -> [N]i32 {
 GRID_HASH_PRIMES := [3]u32{ 73856093, 19349663, 83492791 }
 
 @(private="file")
-hash_grid_cell :: proc(grid_cell: [$N]i32, hash_size: u32) -> u32 {
+hash_grid_cell :: proc(grid_cell: [$N]i32, hash_mask: u32) -> u32 {
     hash: u32 = 0
     for i in 0..<N do hash += u32(grid_cell[i]) * GRID_HASH_PRIMES[i]
-    return hash % hash_size
+    return hash & hash_mask
+}
+
+HASH_PARTICLES_PER_BUCKET :: 4
+MIN_HASH_SIZE :: 64
+
+@(private="file")
+get_next_power_of_2 :: proc(n: u32) -> u32 {
+    if n == 0 do return 1
+    n := n - 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    return n + 1
+}
+
+@(private="file")
+get_hash_size :: proc(particle_count: u32) -> u32 {
+    n := particle_count / HASH_PARTICLES_PER_BUCKET
+    if n < MIN_HASH_SIZE do n = MIN_HASH_SIZE
+    return get_next_power_of_2(n)
 }
 
 // Discretize space into an infinite grid. Populate the lookup table and sort it based on its hash value.
 @(private="file")
 update_spatial_lookup :: proc(positions: [][$N]f32, sim_state: ^FluidSimState(N)) {
-    for i in 0..<sim_state.particle_count {
-        grid_cell_index := get_grid_cell(positions[i], sim_state.physics_cfg.density_smoothing_radius)
-        grid_cell_hash  := hash_grid_cell(grid_cell_index, sim_state.particle_count)
+    count               := sim_state.particle_count
+    hash_size           := sim_state.hash_size
+    cell_size           := sim_state.physics_cfg.density_smoothing_radius
+    spatial_lookup      := sim_state.spatial_lookup
+    sorted_indices      := sim_state.sorted_particle_index
+    cell_prefix_sum     := sim_state.cell_prefix_sum
+    cell_particle_count := sim_state.cell_particle_count
 
+    // Capture the grid hash for each particle, keep a histogram of the grid hashes
+    slice.zero(cell_particle_count)
+    for i in 0..<count {
+        grid_cell_hash := hash_grid_cell(get_grid_cell(positions[i], sim_state.physics_cfg.density_smoothing_radius), sim_state.hash_mask)
         // Each particle has a spatial lookup value in the form of a hash of the grid cell index.
         // The particles will be sorted based on their grid_cell_hash so that particles in the same
-        // cell are adjacent in the array. The start_index array holds the first index in a contiguous
-        // sequence of particles in one cell.
-        sim_state.particle_index[i] = u32(i)
+        // cell are adjacent in the array.
         sim_state.spatial_lookup[i] = grid_cell_hash
-        sim_state.start_index[i]    = max(u32) // maximum value of a u32
+        sim_state.cell_particle_count[grid_cell_hash] += 1
     }
 
-    // Sorts sim_state.spatial_lookup in place, and returns the permutation in indices
-    indices := slice.sort_with_indices(sim_state.spatial_lookup[:sim_state.particle_count])
-    defer delete(indices)
-    slice.sort_by_indices_overwrite(sim_state.particle_index[:sim_state.particle_count], indices) // Use the permutation to sort the particle_index array
+    // This is the main counting sort mechanism. Each cell_prefix_sum bucket will contain the location in the sorted array
+    // of the last instance of the current bucket index
+    running_total: u32 = 0
+    for k in 0..<hash_size {
+        cell_prefix_sum[k] = running_total
+        running_total += cell_particle_count[k]
+        cell_particle_count[k] = cell_prefix_sum[k]
+    }
+    cell_prefix_sum[hash_size] = running_total // Should be entire particle count
 
-    // This loop updates the start indices
-    for i in 0..<sim_state.particle_count {
-        grid_key := sim_state.spatial_lookup[i]
-        prev_grid_key := i == 0 ? max(u32) : sim_state.spatial_lookup[i - 1]
-        if grid_key != prev_grid_key do sim_state.start_index[grid_key] = i // If hashes differ, we are in a new grid entry, so a new start_index
+    // Fill the sorted array
+    for i in 0..<count {
+        sorted_slot := cell_particle_count[spatial_lookup[i]]
+        cell_particle_count[spatial_lookup[i]] += 1
+        sorted_indices[sorted_slot] = i
     }
 }
 
@@ -528,8 +572,8 @@ neighborhood_iterator_make :: proc(sim_state: ^FluidSimState($N), position: [N]f
         smoothing_radius_sq = radius * radius,
         offset_idx          = -1,
         offset_count        = offset_count,
-        particle_idx        = 0,
-        grid_key            = 0,
+        sorted_slot         = 0,
+        sorted_slot_end     = 0,
     }
 }
 
@@ -539,7 +583,7 @@ neighborhood_iterator_next :: proc(it: ^NeighborhoodIterator($N)) -> (dist: [N]f
 
     for {
         // Find the next neighbor grid cell
-        if it.offset_idx == -1 || it.particle_idx >= sim_state.particle_count || sim_state.spatial_lookup[it.particle_idx] != it.grid_key {
+        if it.sorted_slot >= it.sorted_slot_end {
             it.offset_idx += 1
             if it.offset_idx >= it.offset_count do return {}, 0, false
 
@@ -551,15 +595,15 @@ neighborhood_iterator_next :: proc(it: ^NeighborhoodIterator($N)) -> (dist: [N]f
                 rem /= 3
             }
 
-            neighbor_cell := it.grid_cell + offset
-            it.grid_key     = hash_grid_cell(neighbor_cell, sim_state.particle_count) // Store the grid key for the offset cell
-            it.particle_idx = sim_state.start_index[it.grid_key] // Find the first particle in the offset cell
+            key := hash_grid_cell(it.grid_cell + offset, sim_state.hash_mask) // Store the grid key for the offset cell
+            it.sorted_slot      = sim_state.cell_prefix_sum[key]
+            it.sorted_slot_end  = sim_state.cell_prefix_sum[key + 1]
             continue
         }
 
         // Set the return value for the particle index of the current particle being iterated over
-        particle_index = sim_state.particle_index[it.particle_idx]
-        it.particle_idx += 1
+        particle_index = sim_state.sorted_particle_index[it.sorted_slot]
+        it.sorted_slot += 1
 
         dist = it.particle_positions[particle_index] - it.position
         square_dst := linalg.dot(dist, dist) // To avoid sqrt

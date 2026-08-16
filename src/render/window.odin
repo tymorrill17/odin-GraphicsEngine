@@ -24,6 +24,7 @@ Window :: struct {
     resized:            bool,
 }
 
+@(private)
 window_create :: proc(width, height: i32, name: cstring) -> Window {
     window: Window
 
@@ -74,6 +75,7 @@ window_create :: proc(width, height: i32, name: cstring) -> Window {
     return window
 }
 
+@(private)
 window_destroy :: proc(window: ^Window) {
     glfw.DestroyWindow(window.glfw_window)
     glfw.Terminate()
@@ -96,10 +98,12 @@ set_fullscreen :: proc(window: ^Window, enable: bool) {
     window.resized    = true
 }
 
+@(private)
 poll_events :: proc() {
     glfw.PollEvents()
 }
 
+@(private)
 update_window_info :: proc(window: ^Window) {
     window.scale.x, window.scale.y             = glfw.GetWindowContentScale(window.glfw_window)
     window.extent.x, window.extent.y           = glfw.GetWindowSize(window.glfw_window)

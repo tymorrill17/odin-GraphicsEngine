@@ -4,7 +4,6 @@ import "thirdparty:imgui"
 import vk "vendor:vulkan"
 import "render"
 import "core:log"
-import "core:math"
 
 APPLICATION_WIDTH  :: 2560
 APPLICATION_HEIGHT :: 1440
