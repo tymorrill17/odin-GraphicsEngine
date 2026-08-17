@@ -5,7 +5,7 @@ import "core:math"
 import "core:slice"
 import "core:thread"
 import "base:runtime"
-import "core:mem"
+import "core:sync"
 import "core:os"
 import "core:math/linalg"
 import "core:math/rand"
@@ -47,10 +47,6 @@ FluidSimState :: struct($N: int) {
     mouse_left_down:        bool,
     mouse_right_down:       bool,
 
-    // Thread objects
-    n_workers:              int,
-    worker_pool:            thread.Pool,
-
     // Particle properties
     density:                []f32,
     acceleration:           [][N]f32,
@@ -74,6 +70,13 @@ FluidSimState :: struct($N: int) {
 
     particle_count:         u32,
     accumulated_time:       f32,
+
+    // Multi-threading
+    n_worker_threads:       int,
+    worker_threads:         []^thread.Thread, // of size n_worker_threads - 1 since main thread is worker 0
+    thread_barrier:         sync.Barrier,
+    thread_start_semaphore: sync.Sema,
+    thread_quit:            bool,
 }
 
 NeighborhoodIterator :: struct($N: int) {
@@ -162,9 +165,9 @@ fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^
     state.velocities2           = make([][N]f32, system.max_particles)
     state.l2                    = make([][N]f32, system.max_particles)
 
-    state.n_workers = os.get_processor_core_count()
-    thread.pool_init(&state.worker_pool, allocator = runtime.heap_allocator(), thread_count = state.n_workers)
-    thread.pool_start(&state.worker_pool)
+    state.n_worker_threads = os.get_processor_core_count()
+    // thread.pool_init(&state.worker_pool, allocator = runtime.heap_allocator(), thread_count = state.n_workers)
+    // thread.pool_start(&state.worker_pool)
 
     when N == 2 {
         return render.ParticleMotion{ data = state, started = false, update = fluidsim_update_particles_2d, destroy = fluidsim_state_destroy_2d }
@@ -238,24 +241,6 @@ fluidsim_update_particles_3d :: proc(system: ^render.CPUParticleSystem, dt: f32)
     fluidsim_update_particles(3, system, dt)
 }
 
-// Capture the input state for the current frame so each physics step sees the same input
-@(private="file")
-fluidsim_update_mouse_input :: proc(sim_state: ^FluidSimState($N)) {
-    input := sim_state.input
-    if input == nil do return
-
-    sim_state.mouse_captured   = input.mouse_captured
-    sim_state.mouse_left_down  = sim_state.mouse_captured && render.mouse_down(input, .left)
-    sim_state.mouse_right_down = sim_state.mouse_captured && render.mouse_down(input, .right)
-
-    world := render.mouse_world_position_from_viewproj(input, sim_state.camera.viewproj)
-    when N == 2 {
-        sim_state.mouse_position = { world.x, world.y }
-    } else when N == 3 {
-        sim_state.mouse_position = world
-    }
-}
-
 @(private="file")
 fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt: f32) {
     sim_state := cast(^FluidSimState(N))system.motion.data
@@ -281,14 +266,25 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
         fluidsim_set_init_particle_positions(system, sim_state, sim_state.particle_cfg^)
     } else {
         sim_state.accumulated_time += math.min(dt, sim_state.physics_cfg.max_time_step)
+        n_steps := 0
         for sim_state.accumulated_time >= sim_state.physics_cfg.time_step {
-            sub_dt := sim_state.physics_cfg.time_step / f32(sim_state.physics_cfg.n_substeps)
+            sim_state.accumulated_time -= sim_state.physics_cfg.time_step
+            n_steps += 1
+        }
+
+        sub_dt := sim_state.physics_cfg.time_step / f32(sim_state.physics_cfg.n_substeps)
+
+        for _ in 0..<n_steps {
             for _ in 0..<sim_state.physics_cfg.n_substeps {
                 // update spatial lookup table
                 update_spatial_lookup(sim_state.position, sim_state)
 
+                // BARRIER
+
                 // calculate particle densities
                 calculate_all_densities(sim_state.position, sim_state)
+
+                // BARRIER
 
                 // get acceleration
                 calculate_all_accelerations(sim_state.position, sim_state.velocity, sim_state)
@@ -298,10 +294,19 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
                     sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
                     sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i] // TODO: Should I use velocity or velocities2?
                 }
+
+                // BARRIER
+
                 // update spatial lookup for 2nd particles array (should this happen?)
                 update_spatial_lookup(sim_state.positions2, sim_state)
+
+                // BARRIER
+
                 // calculate particle densities for 2nd particles array
                 calculate_all_densities(sim_state.positions2, sim_state)
+
+                // BARRIER
+
                 // get acceleration (for 2nd particles array
                 calculate_all_accelerations_to_array(sim_state.positions2, sim_state.velocities2, sim_state, sim_state.l2)
 
@@ -314,8 +319,9 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
 
                 // resolve boundary collisions
                 resolve_boundary_collisions(sim_state)
+
+                // JOIN ALL THREADS
             }
-            sim_state.accumulated_time -= sim_state.physics_cfg.time_step
         }
     }
 
@@ -326,6 +332,24 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
             system.particles[i].position = sim_state.position[i]
         }
         system.particles[i].color = sim_state.color[i]
+    }
+}
+
+// Capture the input state for the current frame so each physics step sees the same input
+@(private="file")
+fluidsim_update_mouse_input :: proc(sim_state: ^FluidSimState($N)) {
+    input := sim_state.input
+    if input == nil do return
+
+    sim_state.mouse_captured   = input.mouse_captured
+    sim_state.mouse_left_down  = sim_state.mouse_captured && render.mouse_down(input, .left)
+    sim_state.mouse_right_down = sim_state.mouse_captured && render.mouse_down(input, .right)
+
+    world := render.mouse_world_position_from_viewproj(input, sim_state.camera.viewproj)
+    when N == 2 {
+        sim_state.mouse_position = { world.x, world.y }
+    } else when N == 3 {
+        sim_state.mouse_position = world
     }
 }
 
