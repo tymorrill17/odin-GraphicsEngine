@@ -70,6 +70,7 @@ FluidSimState :: struct($N: int) {
 
     particle_count:         u32,
     accumulated_time:       f32,
+    n_steps_per_update:     int,
 
     // Multi-threading
     n_worker_threads:       int,
@@ -165,9 +166,28 @@ fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^
     state.velocities2           = make([][N]f32, system.max_particles)
     state.l2                    = make([][N]f32, system.max_particles)
 
-    state.n_worker_threads = os.get_processor_core_count()
-    // thread.pool_init(&state.worker_pool, allocator = runtime.heap_allocator(), thread_count = state.n_workers)
-    // thread.pool_start(&state.worker_pool)
+    state.n_worker_threads = max(1, os.get_processor_core_count())
+    sync.barrier_init(&state.thread_barrier, state.n_worker_threads)
+    sync.atomic_store(&state.thread_quit, false) // thread_quit should only be stored and loaded via atomic operations
+    worker_proc: thread.Thread_Proc
+    when N == 2 {
+        worker_proc = fluidsim_worker_proc_2d
+    } else when N == 3 {
+        worker_proc = fluidsim_worker_proc_3d
+    }
+
+    // Initialize the worker threads
+    state.worker_threads = make([]^thread.Thread, state.n_worker_threads - 1)
+    for &t, i in state.worker_threads {
+        t = thread.create(worker_proc)
+
+        t.data = state
+        t.user_index = i + 1 // main thread is 0
+
+        // each thread will get its own new context
+        t.init_context = runtime.default_context()
+        thread.start(t) // Start the thread, which will immediately begin waiting for an update step
+    }
 
     when N == 2 {
         return render.ParticleMotion{ data = state, started = false, update = fluidsim_update_particles_2d, destroy = fluidsim_state_destroy_2d }
@@ -190,6 +210,18 @@ fluidsim_state_destroy_3d :: proc(data: rawptr) {
 @(private="file")
 fluidsim_state_destroy :: proc($N: int, data: rawptr) {
     state := cast(^FluidSimState(N))data
+
+    sync.atomic_store(&state.thread_quit, true)
+    if len(state.worker_threads) > 0 { // Make sure all the threads wake to know they have to quit
+        sync.sema_post(&state.thread_start_semaphore, len(state.worker_threads))
+    }
+
+    thread.join_multiple(..state.worker_threads)
+    for &t in state.worker_threads {
+        thread.destroy(t)
+    }
+    delete(state.worker_threads)
+
     delete(state.color)
     delete(state.position)
     delete(state.velocity)
@@ -259,69 +291,24 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
         }
     }
 
-    assert(sim_state.physics_cfg.n_substeps != 0)
+    PARALLEL_THRESHOLD :: 100
 
     if !system.motion.started {
         sim_state.accumulated_time = 0
         fluidsim_set_init_particle_positions(system, sim_state, sim_state.particle_cfg^)
     } else {
         sim_state.accumulated_time += math.min(dt, sim_state.physics_cfg.max_time_step)
-        n_steps := 0
+        sim_state.n_steps_per_update = 0
         for sim_state.accumulated_time >= sim_state.physics_cfg.time_step {
             sim_state.accumulated_time -= sim_state.physics_cfg.time_step
-            n_steps += 1
+            sim_state.n_steps_per_update += 1
         }
 
-        sub_dt := sim_state.physics_cfg.time_step / f32(sim_state.physics_cfg.n_substeps)
-
-        for _ in 0..<n_steps {
-            for _ in 0..<sim_state.physics_cfg.n_substeps {
-                // update spatial lookup table
-                update_spatial_lookup(sim_state.position, sim_state)
-
-                // BARRIER
-
-                // calculate particle densities
-                calculate_all_densities(sim_state.position, sim_state)
-
-                // BARRIER
-
-                // get acceleration
-                calculate_all_accelerations(sim_state.position, sim_state.velocity, sim_state)
-
-                // find k2 and l2
-                for i in 0..<sim_state.particle_count {
-                    sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
-                    sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i] // TODO: Should I use velocity or velocities2?
-                }
-
-                // BARRIER
-
-                // update spatial lookup for 2nd particles array (should this happen?)
-                update_spatial_lookup(sim_state.positions2, sim_state)
-
-                // BARRIER
-
-                // calculate particle densities for 2nd particles array
-                calculate_all_densities(sim_state.positions2, sim_state)
-
-                // BARRIER
-
-                // get acceleration (for 2nd particles array
-                calculate_all_accelerations_to_array(sim_state.positions2, sim_state.velocities2, sim_state, sim_state.l2)
-
-                // combine both particles array to get the next pos and vel
-                half_dt := sub_dt * 0.5
-                for i in 0..<sim_state.particle_count {
-                    sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + sim_state.l2[i])
-                    sim_state.position[i] += half_dt * (sim_state.velocity[i] + sim_state.velocities2[i])
-                }
-
-                // resolve boundary collisions
-                resolve_boundary_collisions(sim_state)
-
-                // JOIN ALL THREADS
-            }
+        if sim_state.particle_count < PARALLEL_THRESHOLD {
+            fluidsim_run_update_step_sequential(N, sim_state)
+        } else {
+            sync.sema_post(&sim_state.thread_start_semaphore, sim_state.n_worker_threads - 1) // Increment the semaphore by the number of worker threads minus the main thread to wake the workers
+            fluidsim_run_update_step_parallel(N, sim_state, 0)
         }
     }
 
@@ -333,6 +320,135 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
         }
         system.particles[i].color = sim_state.color[i]
     }
+}
+
+@(private="file")
+fluidsim_worker_proc_2d :: proc(t: ^thread.Thread) {
+    fluidsim_worker_proc(2, t)
+}
+
+@(private="file")
+fluidsim_worker_proc_3d :: proc(t: ^thread.Thread) {
+    fluidsim_worker_proc(3, t)
+}
+
+// The worker thread proc. It waits on the start semaphore after
+@(private="file")
+fluidsim_worker_proc :: proc($N: int, t: ^thread.Thread) {
+    sim_state := cast(^FluidSimState(N))t.data
+    for {
+        sync.sema_wait(&sim_state.thread_start_semaphore)
+        if sync.atomic_load(&sim_state.thread_quit) do break
+        fluidsim_run_update_step_parallel(N, sim_state, t.user_index)
+    }
+}
+
+@(private="file")
+fluidsim_run_update_step_parallel :: proc($N: int, sim_state: ^FluidSimState(N), worker_index: int) {
+    first, last := get_worker_index_range(sim_state.particle_count, worker_index, sim_state.n_worker_threads)
+
+    sub_dt := sim_state.physics_cfg.time_step / f32(sim_state.physics_cfg.n_substeps)
+    half_dt := sub_dt * 0.5
+    for _ in 0..<sim_state.n_steps_per_update {
+        for _ in 0..<sim_state.physics_cfg.n_substeps {
+
+            // update spatial lookup table
+            if worker_index == 0 do update_spatial_lookup(sim_state.position, sim_state)
+            sync.barrier_wait(&sim_state.thread_barrier)
+
+            // calculate particle densities
+            for i in first..<last do sim_state.density[i] = calculate_density(i, sim_state.position, sim_state)
+            sync.barrier_wait(&sim_state.thread_barrier)
+
+            // get acceleration & integrate k2 and l2
+            for i in first..<last {
+                sim_state.acceleration[i] = calculate_acceleration(i, sim_state.position, sim_state.velocity, sim_state)
+                sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
+                sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i] // TODO: Should I use velocity or velocities2?
+            }
+            sync.barrier_wait(&sim_state.thread_barrier)
+
+            // update spatial lookup for 2nd particles array (should this happen?)
+            if worker_index == 0 do update_spatial_lookup(sim_state.positions2, sim_state)
+            sync.barrier_wait(&sim_state.thread_barrier)
+
+            // calculate particle densities for 2nd particles array
+            for i in first..<last do sim_state.density[i] = calculate_density(i, sim_state.positions2, sim_state)
+            sync.barrier_wait(&sim_state.thread_barrier)
+
+            // get acceleration (for 2nd particles array
+            // combine both particles array to get the next pos and vel
+            for i in first..<last {
+                sim_state.l2[i] = calculate_acceleration(i, sim_state.positions2, sim_state.velocities2, sim_state)
+                sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + sim_state.l2[i])
+                sim_state.position[i] += half_dt * (sim_state.velocity[i] + sim_state.velocities2[i])
+            }
+            // resolve boundary collisions
+            resolve_boundary_collisions(sim_state, first, last)
+            sync.barrier_wait(&sim_state.thread_barrier)
+        }
+    }
+}
+
+@(private="file")
+fluidsim_run_update_step_sequential :: proc($N: int, sim_state: ^FluidSimState(N)) {
+    sub_dt := sim_state.physics_cfg.time_step / f32(sim_state.physics_cfg.n_substeps)
+    half_dt := sub_dt * 0.5
+    for _ in 0..<sim_state.n_steps_per_update {
+        for _ in 0..<sim_state.physics_cfg.n_substeps {
+            // update spatial lookup table
+            update_spatial_lookup(sim_state.position, sim_state)
+
+            // calculate particle densities
+            calculate_all_densities(sim_state.position, sim_state)
+
+            // get acceleration
+            calculate_all_accelerations(sim_state.position, sim_state.velocity, sim_state)
+
+            // find k2 and l2
+            for i in 0..<sim_state.particle_count {
+                sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
+                sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i] // TODO: Should I use velocity or velocities2?
+            }
+
+            // update spatial lookup for 2nd particles array (should this happen?)
+            update_spatial_lookup(sim_state.positions2, sim_state)
+
+            // calculate particle densities for 2nd particles array
+            calculate_all_densities(sim_state.positions2, sim_state)
+
+            // get acceleration (for 2nd particles array
+            calculate_all_accelerations_to_array(sim_state.positions2, sim_state.velocities2, sim_state, sim_state.l2)
+
+            // combine both particles array to get the next pos and vel
+            for i in 0..<sim_state.particle_count {
+                sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + sim_state.l2[i])
+                sim_state.position[i] += half_dt * (sim_state.velocity[i] + sim_state.velocities2[i])
+            }
+
+            // resolve boundary collisions
+            resolve_boundary_collisions(sim_state, 0, sim_state.particle_count)
+        }
+    }
+}
+
+// Find the particle index range for the given thread. It is distributed in chunks the size of the cache line
+@(private="file")
+get_worker_index_range :: proc(particle_count: u32, worker_index, n_worker_threads: int) -> (low, high: u32) {
+    WORKER_THREAD_CHUNK_ALIGN :: 64 / size_of(f32) // 64 byte cache line alignment
+
+    n_chunks_total      := (particle_count + WORKER_THREAD_CHUNK_ALIGN - 1) / WORKER_THREAD_CHUNK_ALIGN
+    n_chunks_per_thread := n_chunks_total / u32(n_worker_threads)
+    n_chunks_leftover   := n_chunks_total % u32(n_worker_threads)
+    worker_index        := u32(worker_index)
+
+    low  = n_chunks_per_thread * worker_index + min(worker_index, n_chunks_leftover)
+    high = low + n_chunks_per_thread + (worker_index < n_chunks_leftover ? 1 : 0)
+
+    // Clamp the bounds to the number of particles so we don't go out of bounds
+    low  = min(low  * WORKER_THREAD_CHUNK_ALIGN, particle_count)
+    high = min(high * WORKER_THREAD_CHUNK_ALIGN, particle_count)
+    return low, high
 }
 
 // Capture the input state for the current frame so each physics step sees the same input
@@ -398,20 +514,20 @@ update_spatial_lookup :: proc(positions: [][$N]f32, sim_state: ^FluidSimState(N)
     count               := sim_state.particle_count
     hash_size           := sim_state.hash_size
     cell_size           := sim_state.physics_cfg.density_smoothing_radius
-    spatial_lookup      := sim_state.spatial_lookup
-    sorted_indices      := sim_state.sorted_particle_index
-    cell_prefix_sum     := sim_state.cell_prefix_sum
-    cell_particle_count := sim_state.cell_particle_count
+    spatial_lookup      := sim_state.spatial_lookup[:count]
+    sorted_indices      := sim_state.sorted_particle_index[:count]
+    cell_prefix_sum     := sim_state.cell_prefix_sum[:hash_size + 1]
+    cell_particle_count := sim_state.cell_particle_count[:hash_size]
 
     // Capture the grid hash for each particle, keep a histogram of the grid hashes
     slice.zero(cell_particle_count)
     for i in 0..<count {
-        grid_cell_hash := hash_grid_cell(get_grid_cell(positions[i], sim_state.physics_cfg.density_smoothing_radius), sim_state.hash_mask)
+        grid_cell_hash := hash_grid_cell(get_grid_cell(positions[i], cell_size), sim_state.hash_mask)
         // Each particle has a spatial lookup value in the form of a hash of the grid cell index.
         // The particles will be sorted based on their grid_cell_hash so that particles in the same
         // cell are adjacent in the array.
-        sim_state.spatial_lookup[i] = grid_cell_hash
-        sim_state.cell_particle_count[grid_cell_hash] += 1
+        spatial_lookup[i] = grid_cell_hash
+        cell_particle_count[grid_cell_hash] += 1
     }
 
     // This is the main counting sort mechanism. Each cell_prefix_sum bucket will contain the location in the sorted array
@@ -433,19 +549,6 @@ update_spatial_lookup :: proc(positions: [][$N]f32, sim_state: ^FluidSimState(N)
 }
 
 @(private="file")
-pool_wait_batch :: proc(pool: ^thread.Pool) {
-    // The calling thread pulls tasks too
-    for task in thread.pool_pop_waiting(pool) {
-        thread.pool_do_work(pool, task)
-    }
-    for thread.pool_num_outstanding(pool) > 0 {
-        thread.yield()
-    }
-    // pool_do_work() appends finished tasks to pool.tasks_done
-    for _ in thread.pool_pop_done(pool) { }
-}
-
-@(private="file")
 calculate_density :: proc(particle_idx: u32, particle_positions: [][$N]f32, sim_state: ^FluidSimState(N)) -> f32 {
     density: f32 = 0.0
     iter := neighborhood_iterator_make(sim_state, particle_positions[particle_idx], raw_data(particle_positions))
@@ -464,12 +567,6 @@ calculate_density :: proc(particle_idx: u32, particle_positions: [][$N]f32, sim_
 
 @(private="file")
 calculate_all_densities :: proc(particle_positions: [][$N]f32, sim_state: ^FluidSimState(N)) {
-    for i in 0..<sim_state.particle_count {
-        sim_state.density[i] = calculate_density(i, particle_positions, sim_state)
-    }
-}
-
-calculate_all_densities_parallel :: proc(particle_positions: [][$N]f32, sim_state: ^FluidSimState(N)) {
     for i in 0..<sim_state.particle_count {
         sim_state.density[i] = calculate_density(i, particle_positions, sim_state)
     }
@@ -566,8 +663,8 @@ calculate_pressure_force :: proc(particle_idx: u32, particle_positions: [][$N]f3
 }
 
 @(private="file")
-resolve_boundary_collisions :: proc(sim_state: ^FluidSimState($N)) {
-    for i in 0..<sim_state.particle_count {
+resolve_boundary_collisions :: proc(sim_state: ^FluidSimState($N), first_index, last_index: u32) {
+    for i in first_index..<last_index {
         for dim in 0..<N {
             if sim_state.position[i][dim] > (sim_state.bbox.max[dim] - sim_state.particle_cfg.radius) {
                 sim_state.position[i][dim] = sim_state.bbox.max[dim] - sim_state.particle_cfg.radius
