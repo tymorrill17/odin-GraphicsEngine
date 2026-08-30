@@ -364,7 +364,7 @@ fluidsim_run_update_step_parallel :: proc($N: int, sim_state: ^FluidSimState(N),
             for i in first..<last {
                 sim_state.acceleration[i] = calculate_acceleration(i, sim_state.position, sim_state.velocity, sim_state)
                 sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
-                sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i] // TODO: Should I use velocity or velocities2?
+                sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i]
             }
             sync.barrier_wait(&sim_state.thread_barrier)
 
@@ -408,7 +408,7 @@ fluidsim_run_update_step_sequential :: proc($N: int, sim_state: ^FluidSimState(N
             // find k2 and l2
             for i in 0..<sim_state.particle_count {
                 sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
-                sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i] // TODO: Should I use velocity or velocities2?
+                sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i]
             }
 
             // update spatial lookup for 2nd particles array (should this happen?)
@@ -573,9 +573,7 @@ calculate_all_densities :: proc(particle_positions: [][$N]f32, sim_state: ^Fluid
 }
 
 @(private="file")
-calculate_acceleration :: proc(particle_idx: u32, particle_positions, particle_velocities: [][$N]f32, sim_state: ^FluidSimState(N)) -> [N]f32 {
-
-    // Apply interaction force from the mouse
+calculate_interaction_force  :: proc(particle_idx: u32, particle_positions, particle_velocities: [][$N]f32, sim_state: ^FluidSimState(N)) -> [N]f32 {
     interaction_acceleration: [N]f32 = 0
     if sim_state.mouse_captured && (sim_state.mouse_left_down || sim_state.mouse_right_down) {
         // RMB pulls the particles in, LMB button pushes them away
@@ -594,6 +592,14 @@ calculate_acceleration :: proc(particle_idx: u32, particle_positions, particle_v
             interaction_acceleration += (direction * interaction_strength - particle_velocities[particle_idx]) * center_factor
         }
     }
+    return interaction_acceleration
+}
+
+@(private="file")
+calculate_acceleration :: proc(particle_idx: u32, particle_positions, particle_velocities: [][$N]f32, sim_state: ^FluidSimState(N)) -> [N]f32 {
+
+    // Apply interaction force from the mouse
+    interaction_acceleration := calculate_interaction_force(particle_idx, particle_positions, particle_velocities, sim_state)
 
     // Get the pressure force and convert it to acceleration by dividing density
     pressure_acceleration := calculate_pressure_force(particle_idx, particle_positions, sim_state.density, sim_state) / sim_state.density[particle_idx]
