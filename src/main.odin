@@ -5,8 +5,8 @@ import vk "vendor:vulkan"
 import "render"
 import "core:log"
 
-APPLICATION_WIDTH  :: 2560
-APPLICATION_HEIGHT :: 1440
+APPLICATION_WIDTH  :: 1600
+APPLICATION_HEIGHT :: 900
 
 requested_validation_layers : []cstring : {
     "VK_LAYER_KHRONOS_validation", // Standard validation layer preset

@@ -120,8 +120,11 @@ gui_draw :: proc(renderer: ^Renderer) {
     render_info := rendering_info_struct(draw_extent, 1, &color_attachment_info, nil)
 
     vk.CmdBeginRendering(cmd, &render_info)
-    imgui.Render()
-    imgui_impl_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
+    if renderer.draw_gui {
+        imgui.Render()
+        imgui_impl_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
+    }
     vk.CmdEndRendering(cmd)
+    imgui.EndFrame()
 
 }

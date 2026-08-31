@@ -33,6 +33,11 @@ FluidSimPhysicsConfig :: struct {
     interaction_radius:       f32,
 };
 
+FluidSimAction :: enum {
+    pushing,
+    pulling,
+}
+
 FluidSimState :: struct($N: int) {
     system:                 ^render.CPUParticleSystem,
     particle_cfg:           ^FluidSimParticleConfig,
@@ -42,10 +47,9 @@ FluidSimState :: struct($N: int) {
     // Mouse interaction
     input:                  ^render.Input,
     camera:                 ^CameraData,
-    mouse_position:         [N]f32,
-    mouse_captured:         bool,
-    mouse_left_down:        bool,
-    mouse_right_down:       bool,
+    interaction_pos:        [N]f32,
+    is_interacting:         bool,
+    interaction:            FluidSimAction,
 
     // Particle properties
     density:                []f32,
@@ -457,15 +461,20 @@ fluidsim_update_mouse_input :: proc(sim_state: ^FluidSimState($N)) {
     input := sim_state.input
     if input == nil do return
 
-    sim_state.mouse_captured   = input.mouse_captured
-    sim_state.mouse_left_down  = sim_state.mouse_captured && render.mouse_down(input, .left)
-    sim_state.mouse_right_down = sim_state.mouse_captured && render.mouse_down(input, .right)
+    sim_state.is_interacting = false
+    if input.mouse_states[.left].down {
+        sim_state.is_interacting    = true
+        sim_state.interaction       = .pushing
+    } else if input.mouse_states[.right].down {
+        sim_state.is_interacting    = true
+        sim_state.interaction       = .pulling
+    }
 
     world := render.mouse_world_position_from_viewproj(input, sim_state.camera.viewproj)
     when N == 2 {
-        sim_state.mouse_position = { world.x, world.y }
+        sim_state.interaction_pos = { world.x, world.y }
     } else when N == 3 {
-        sim_state.mouse_position = world
+        sim_state.interaction_pos = world
     }
 }
 
@@ -575,13 +584,13 @@ calculate_all_densities :: proc(particle_positions: [][$N]f32, sim_state: ^Fluid
 @(private="file")
 calculate_interaction_force  :: proc(particle_idx: u32, particle_positions, particle_velocities: [][$N]f32, sim_state: ^FluidSimState(N)) -> [N]f32 {
     interaction_acceleration: [N]f32 = 0
-    if sim_state.mouse_captured && (sim_state.mouse_left_down || sim_state.mouse_right_down) {
+    if sim_state.is_interacting {
         // RMB pulls the particles in, LMB button pushes them away
-        interaction_strength := sim_state.mouse_right_down ? sim_state.physics_cfg.interaction_strength : -sim_state.physics_cfg.interaction_strength
+        interaction_strength := sim_state.interaction == .pulling ? sim_state.physics_cfg.interaction_strength : -sim_state.physics_cfg.interaction_strength
         interaction_radius   := sim_state.physics_cfg.interaction_radius
 
         // Hand is interacting, so find the vector from the hand to the particle and find its squared distance
-        particle_to_hand := sim_state.mouse_position - particle_positions[particle_idx]
+        particle_to_hand := sim_state.interaction_pos - particle_positions[particle_idx]
         sqr_dst          := linalg.dot(particle_to_hand, particle_to_hand)
 
         // If particle is in hand radius, change acceleration on particle

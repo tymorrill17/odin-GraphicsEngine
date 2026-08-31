@@ -4,10 +4,14 @@ import "vendor:glfw"
 import "core:math/linalg"
 import "thirdparty:imgui"
 
-InputKey :: enum i32 {
+MouseKey :: enum i32 {
     left   = glfw.MOUSE_BUTTON_LEFT,
     right  = glfw.MOUSE_BUTTON_RIGHT,
     middle = glfw.MOUSE_BUTTON_MIDDLE,
+}
+
+Key :: enum i32 {
+    tilde        = glfw.KEY_GRAVE_ACCENT,
 }
 
 KeyState :: struct {
@@ -21,8 +25,9 @@ Input :: struct {
     mouse_delta:        float2, // Change in window coordinates since the last frame
     mouse_ndc:          float2, // Cursor position in clip space: [-1, 1]
     mouse_captured:     bool,
+    mouse_states:       [MouseKey]KeyState,
 
-    key_states:         [InputKey]KeyState,
+    key_states:         [Key]KeyState,
 }
 
 // Called at the beginning of every frame, after events have been polled
@@ -44,24 +49,19 @@ input_update :: proc(renderer: ^Renderer) {
     input.mouse_captured = !imgui.GetIO().WantCaptureMouse
 
     // Get all button states
-    for key in InputKey {
-        down  := glfw.GetMouseButton(glfw_window, i32(key)) == glfw.PRESS
+    for key in MouseKey {
+        down := glfw.GetMouseButton(glfw_window, i32(key)) == glfw.PRESS
+        input.mouse_states[key].pressed  = down && !input.mouse_states[key].down
+        input.mouse_states[key].released = !down && input.mouse_states[key].down
+        input.mouse_states[key].down     = down
+    }
+
+    for key in Key {
+        down := glfw.GetKey(glfw_window, i32(key)) == glfw.PRESS
         input.key_states[key].pressed  = down && !input.key_states[key].down
         input.key_states[key].released = !down && input.key_states[key].down
         input.key_states[key].down     = down
     }
-}
-
-mouse_down :: proc(input: ^Input, key: InputKey) -> bool {
-    return input.key_states[key].down
-}
-
-mouse_pressed :: proc(input: ^Input, key: InputKey) -> bool {
-    return input.key_states[key].pressed
-}
-
-mouse_released :: proc(input: ^Input, key: InputKey) -> bool {
-    return input.key_states[key].released
 }
 
 // Project the cursor into world space using the inverse viewproj matrix

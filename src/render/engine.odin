@@ -108,6 +108,7 @@ Renderer :: struct {
     frames_in_flight:           u32,
 
     render_scale:               f32,
+    draw_gui:                   bool,
 }
 
 renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
@@ -200,6 +201,7 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
 
     // initialize the debug gui
     gui_initialize(renderer)
+    renderer.draw_gui = true
 }
 
 renderer_shutdown :: proc(renderer: ^Renderer) {
@@ -271,6 +273,13 @@ start_frame :: proc(renderer: ^Renderer) {
     resize_callback(renderer)
     gui_start_frame()
     input_update(renderer)
+    process_inputs(renderer)
+}
+
+process_inputs :: proc(renderer: ^Renderer) {
+    if renderer.input.key_states[.tilde].pressed {
+        renderer.draw_gui = renderer.draw_gui ? false : true
+    }
 }
 
 draw :: proc(renderer: ^Renderer) {
