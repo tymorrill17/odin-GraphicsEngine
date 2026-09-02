@@ -311,7 +311,7 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
             fluidsim_run_update_step_sequential(N, sim_state)
         } else {
             sync.sema_post(&sim_state.thread_start_semaphore, sim_state.n_worker_threads - 1) // Increment the semaphore by the number of worker threads minus the main thread to wake the workers
-            fluidsim_run_update_step_parallel(N, sim_state, 0)
+            fluidsim_run_update_step_parallel2(N, sim_state, 0)
         }
     }
 
@@ -342,7 +342,52 @@ fluidsim_worker_proc :: proc($N: int, t: ^thread.Thread) {
     for {
         sync.sema_wait(&sim_state.thread_start_semaphore)
         if sync.atomic_load(&sim_state.thread_quit) do break
-        fluidsim_run_update_step_parallel(N, sim_state, t.user_index)
+        fluidsim_run_update_step_parallel2(N, sim_state, t.user_index)
+    }
+}
+
+// Slightly worse stability, but better performance than the other version.
+@(private="file")
+fluidsim_run_update_step_parallel2 :: proc($N: int, sim_state: ^FluidSimState(N), worker_index: int) {
+    first, last := get_worker_index_range(sim_state.particle_count, worker_index, sim_state.n_worker_threads)
+
+    sub_dt := sim_state.physics_cfg.time_step / f32(sim_state.physics_cfg.n_substeps)
+    half_dt := sub_dt * 0.5
+    for _ in 0..<sim_state.n_steps_per_update {
+        for _ in 0..<sim_state.physics_cfg.n_substeps {
+
+            // Compute acceleration due to gravity to make a prediction of the positions
+            gravity_dir: [N]f32
+            gravity_dir.y = -1
+            gravity_acceleration := gravity_dir * sim_state.physics_cfg.gravity
+            for i in first..<last {
+                sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * gravity_acceleration
+                sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i]
+            }
+            sync.barrier_wait(&sim_state.thread_barrier)
+
+            // update spatial lookup table using predicted positions
+            if worker_index == 0 do update_spatial_lookup(sim_state.positions2, sim_state)
+            sync.barrier_wait(&sim_state.thread_barrier)
+
+            // calculate particle densities using predicted positions
+            for i in first..<last do sim_state.density[i] = calculate_density(i, sim_state.positions2, sim_state)
+            sync.barrier_wait(&sim_state.thread_barrier)
+
+            // get the actual acceleration and integrate the velocity
+            for i in first..<last {
+                sim_state.acceleration[i] = calculate_acceleration(i, sim_state.positions2, sim_state.velocities2, sim_state)
+                sim_state.velocity[i] += sub_dt * sim_state.acceleration[i]
+            }
+            sync.barrier_wait(&sim_state.thread_barrier)
+
+            // Integrate position and resolve boundary collisions
+            for i in first..<last {
+                sim_state.position[i] += sub_dt * sim_state.velocity[i]
+            }
+            resolve_boundary_collisions(sim_state, first, last)
+            sync.barrier_wait(&sim_state.thread_barrier)
+        }
     }
 }
 
@@ -563,10 +608,10 @@ calculate_density :: proc(particle_idx: u32, particle_positions: [][$N]f32, sim_
     for dist, _, ok := neighborhood_iterator_next(&iter); ok; dist, _, ok = neighborhood_iterator_next(&iter) {
         dist_sq := linalg.dot(dist, dist)
         when N == 2 {
-            density += kernel_smooth_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
+            density += kernel_spikey_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
         } else when N == 3 {
             // TODO: the smoothing kernel still needs to be adapted to 3D
-            density += kernel_smooth_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
+            density += kernel_spikey_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
         }
     }
     assert(density != 0)
