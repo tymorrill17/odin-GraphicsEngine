@@ -111,6 +111,8 @@ Renderer :: struct {
     draw_gui:                   bool,
 
     capture_image:              Image,
+    screenshot_requested:       bool,
+    screenshot_resolution:      [2]u32,
 }
 
 renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
@@ -201,6 +203,11 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[renderer.swapchain.image_index]
     renderer.current_command            = &renderer.frame_commands[renderer.frame_index]
 
+    // Create a host-visible image to copy the draw image to for capturing screenshots
+    renderer.capture_image = image_create_host(renderer, renderer.draw_image.extent, renderer.draw_image.format, { .TRANSFER_DST, .COLOR_ATTACHMENT })
+    renderer.screenshot_requested = false
+    renderer.screenshot_resolution = { renderer.capture_image.extent.width, renderer.capture_image.extent.height }
+
     // initialize the debug gui
     gui_initialize(renderer)
     renderer.draw_gui = true
@@ -210,6 +217,8 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
     wait_idle(renderer)
 
     gui_destroy(renderer)
+
+    image_destroy(renderer, &renderer.capture_image)
 
     delete(renderer.scene_buffers)
     delete(renderer.scene_descriptor_layouts)
@@ -283,7 +292,7 @@ process_inputs :: proc(renderer: ^Renderer) {
         renderer.draw_gui = renderer.draw_gui ? false : true
     }
     if renderer.input.key_states[.f12].pressed {
-        // Take a screenshot this frame
+        renderer.screenshot_requested = true
     }
 }
 
@@ -407,6 +416,11 @@ draw :: proc(renderer: ^Renderer) {
         renderer.frame_render_fence[frame_index]
     )
     present_to_screen(renderer, present_queue, &renderer.swapchain_render_sem[swapchain_image_index])
+
+    if renderer.screenshot_requested {
+        capture_screenshot(renderer)
+        renderer.screenshot_requested = false
+    }
 
     renderer.frame_number += 1
     renderer.frame_index = u32(renderer.frame_number % u64(renderer.frames_in_flight))

@@ -17,13 +17,15 @@ Image :: struct {
     aspect_flags:   vk.ImageAspectFlags,
     usage_flags:    vk.ImageUsageFlags, // only needed for images with an allocation
     tiling:         vk.ImageTiling,
-    memory_flags:   vma.AllocationCreateFlags,
+    mem_flags:      vma.AllocationCreateFlags,
+    mem_usage:      vma.MemoryUsage,
     mip_levels:     u32,
 }
 
 @(private="file")
 image_create_private :: proc(renderer: ^Renderer, extent: vk.Extent3D, format: vk.Format,
-    usage: vk.ImageUsageFlags, tiling: vk.ImageTiling, memory_flags: vma.AllocationCreateFlags, use_mipmap: bool = false) -> Image {
+    usage: vk.ImageUsageFlags, tiling: vk.ImageTiling, mem_usage: vma.MemoryUsage,
+    mem_flags: vma.AllocationCreateFlags, use_mipmap: bool = false) -> Image {
 
     new_image := Image{
         layout          = .UNDEFINED,
@@ -32,7 +34,8 @@ image_create_private :: proc(renderer: ^Renderer, extent: vk.Extent3D, format: v
         aspect_flags    = format == vk.Format.D32_SFLOAT ? { .DEPTH } : { .COLOR },
         usage_flags     = usage,
         tiling          = tiling,
-        memory_flags    = memory_flags,
+        mem_flags       = mem_flags,
+        mem_usage       = mem_usage,
         mip_levels      = use_mipmap ? u32(math.floor(math.log2(f32(math.max(extent.width, extent.height))))) + 1 : 1,
     }
 
@@ -49,8 +52,8 @@ image_create_private :: proc(renderer: ^Renderer, extent: vk.Extent3D, format: v
     }
 
     alloc_info := vma.AllocationCreateInfo{
-        usage = .AUTO,
-        flags = memory_flags
+        usage = mem_usage,
+        flags = mem_flags
     }
 
     if vma.CreateImage(renderer.allocator, &image_info, &alloc_info, &new_image.handle, &new_image.allocation, nil) != .SUCCESS {
@@ -83,23 +86,23 @@ image_create_private :: proc(renderer: ^Renderer, extent: vk.Extent3D, format: v
 
 // Creates a device-only image
 image_create_device :: proc(renderer: ^Renderer, extent: vk.Extent3D, format: vk.Format, usage: vk.ImageUsageFlags) -> Image {
-    return image_create_private(renderer, extent, format, usage, .OPTIMAL, {}, false)
+    return image_create_private(renderer, extent, format, usage, .OPTIMAL, .AUTO_PREFER_DEVICE, {}, false)
 }
 
 // Creates an image that will be host-accessible
 image_create_host :: proc(renderer: ^Renderer, extent: vk.Extent3D, format: vk.Format, usage: vk.ImageUsageFlags) -> Image {
-    return image_create_private(renderer, extent, format, usage, .LINEAR, { .HOST_ACCESS_RANDOM }, false)
+    return image_create_private(renderer, extent, format, usage, .LINEAR, .AUTO_PREFER_HOST, { .HOST_ACCESS_RANDOM }, false)
 }
 
 // Creates a device-only image that will be used for texture purposes
 image_create_texture :: proc(renderer: ^Renderer, extent: vk.Extent3D, format: vk.Format, usage: vk.ImageUsageFlags, use_mipmaps: bool = false) -> Image {
-    return image_create_private(renderer, extent, format, usage, .OPTIMAL, {}, use_mipmaps)
+    return image_create_private(renderer, extent, format, usage, .OPTIMAL, .AUTO, {}, use_mipmaps)
 }
 
 image_recreate :: proc(renderer: ^Renderer, image: ^Image, extent: vk.Extent3D) {
     use_mipmaps: bool = image.mip_levels > 1
     image_destroy(renderer, image)
-    image^ = image_create_private(renderer, extent, image.format, image.usage_flags, image.tiling, image.memory_flags, use_mipmaps)
+    image^ = image_create_private(renderer, extent, image.format, image.usage_flags, image.tiling, image.mem_usage, image.mem_flags, use_mipmaps)
     image.layout = .UNDEFINED
 }
 
@@ -139,8 +142,39 @@ image_transition :: proc(cmd: vk.CommandBuffer, image: ^Image, new_layout: vk.Im
     image.layout = new_layout
 }
 
+image_transition_now :: proc(renderer: ^Renderer, image: ^Image, new_layout: vk.ImageLayout) {
+    CommandCtx :: struct{ image: ^Image, new_layout: vk.ImageLayout }
+    copy_command_ctx := CommandCtx{
+        image       = image,
+        new_layout  = new_layout,
+    }
+
+    immediate_command_submit(renderer, &copy_command_ctx, proc(cmd: vk.CommandBuffer, user_data: rawptr) {
+        ctx := (^CommandCtx)(user_data)
+        image := ctx.image
+        new_layout := ctx.new_layout
+        image_transition(cmd, image, new_layout)
+    })
+}
+
 image_copy :: proc(cmd: vk.CommandBuffer, src: Image, dst: Image) {
     image_copy_subimage(cmd, src, src.extent, dst, dst.extent)
+}
+
+// Copy image using immediate command buffer
+image_copy_now :: proc(renderer: ^Renderer, src: Image, dst: Image) {
+    CommandCtx :: struct{ src: Image, dst: Image }
+    copy_command_ctx := CommandCtx{
+        src = src,
+        dst = dst,
+    }
+
+    immediate_command_submit(renderer, &copy_command_ctx, proc(cmd: vk.CommandBuffer, user_data: rawptr) {
+        ctx := (^CommandCtx)(user_data)
+        src := ctx.src
+        dst := ctx.dst
+        image_copy_subimage(cmd, src, src.extent, dst, dst.extent)
+    })
 }
 
 image_copy_subimage :: proc(cmd: vk.CommandBuffer, src: Image, src_extent: vk.Extent3D,

@@ -192,6 +192,11 @@ main :: proc() {
         }
 		imgui.End();
 
+        imgui.Begin("Capture")
+        imgui.InputScalarN("Resolution", .U32, &r.screenshot_resolution, 2)
+        if imgui.Button("Take Screenshot") do r.screenshot_requested = true
+        imgui.End()
+
         aspect_ratio := r.window.aspect_ratio
         up := render.float3{ 0, 1, 0 }
         camera_data.proj = render.projection_set_orthographic(-aspect_ratio * 0.5 * camera_config.scale, aspect_ratio * 0.5 * camera_config.scale,

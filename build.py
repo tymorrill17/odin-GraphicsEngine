@@ -14,7 +14,8 @@ BIN_DIR             = "bin"         # name of the final executable (no extension
 SRC_DIR             = "src"         # folder passed to `odin build`
 THIRDPARTY_DIR      = "thirdparty"  # folder containing git-cloned libraries
 SHADER_DIR          = "shaders"     # folder containing all shader files
-CACHE_DIR           = ".cache"     # folder containing all shader files
+CACHE_DIR           = ".cache"      # folder containing all shader files
+CAPTURE_DIR         = "captures"    # folder containing screenshot or video captures
 EXTRA_BUILD_ARGS    = []            # any extra flags you always want, e.g. ["-vet"]
 EXTRA_LINKER_FLAGS  = "-lstdc++"    # input to odin's "extra-linker-flags" build arg
 
@@ -34,6 +35,7 @@ shader_bin_path     = bin_path / SHADER_BIN_DIR
 exe_path            = bin_path / (EXE_NAME if platform.system() != "Windows" else EXE_NAME + ".exe")
 thirdparty_path     = PROJECT_DIR / THIRDPARTY_DIR
 cache_path          = PROJECT_DIR / CACHE_DIR
+capture_path        = PROJECT_DIR / CAPTURE_DIR
 
 
 def clean():
@@ -133,6 +135,7 @@ def compile_project(debug):
         f"-define:SHADER_DIR={shader_path}",
         f"-define:SHADER_BIN_DIR={shader_bin_path}",
         f"-define:CACHE_DIR={cache_path}",
+        f"-define:CAPTURE_DIR={capture_path}",
     ]
 
     # Extra linker flags
@@ -168,6 +171,8 @@ def main() -> int:
         shader_bin_path.mkdir()
     if not cache_path.exists():
         cache_path.mkdir()
+    if not capture_path.exists():
+        capture_path.mkdir()
 
     # clean only, don't build
     if args.clean:

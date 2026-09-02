@@ -1,6 +1,7 @@
 build/
 bin/*
 thirdparty/
+captures/
 ols.json
 imgui.ini
 run
