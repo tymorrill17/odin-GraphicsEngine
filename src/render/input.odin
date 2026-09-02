@@ -11,7 +11,9 @@ MouseKey :: enum i32 {
 }
 
 Key :: enum i32 {
-    tilde        = glfw.KEY_GRAVE_ACCENT,
+    tilde   = glfw.KEY_GRAVE_ACCENT,
+    f12     = glfw.KEY_F12,
+    r       = glfw.KEY_R,
 }
 
 KeyState :: struct {
@@ -27,7 +29,7 @@ Input :: struct {
     mouse_captured:     bool,
     mouse_states:       [MouseKey]KeyState,
 
-    key_states:         [Key]KeyState,
+    key_states:         #sparse[Key]KeyState,
 }
 
 // Called at the beginning of every frame, after events have been polled

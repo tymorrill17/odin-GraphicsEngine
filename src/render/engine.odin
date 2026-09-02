@@ -109,6 +109,8 @@ Renderer :: struct {
 
     render_scale:               f32,
     draw_gui:                   bool,
+
+    capture_image:              Image,
 }
 
 renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
@@ -158,9 +160,9 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
 
     // Create the draw and depth images
     render_extent := vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1}
-    renderer.draw_image = image_create(renderer, render_extent, renderer.swapchain.image_format,
+    renderer.draw_image = image_create_device(renderer, render_extent, renderer.swapchain.image_format,
         { .TRANSFER_SRC, .TRANSFER_DST, .COLOR_ATTACHMENT })
-    renderer.depth_image = image_create(renderer, render_extent, .D32_SFLOAT, { .DEPTH_STENCIL_ATTACHMENT })
+    renderer.depth_image = image_create_device(renderer, render_extent, .D32_SFLOAT, { .DEPTH_STENCIL_ATTACHMENT })
 
     command_pool_initialize(renderer)
     // Allocate a command buffer for each frame in flight
@@ -279,6 +281,9 @@ start_frame :: proc(renderer: ^Renderer) {
 process_inputs :: proc(renderer: ^Renderer) {
     if renderer.input.key_states[.tilde].pressed {
         renderer.draw_gui = renderer.draw_gui ? false : true
+    }
+    if renderer.input.key_states[.f12].pressed {
+        // Take a screenshot this frame
     }
 }
 
