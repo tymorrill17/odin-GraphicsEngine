@@ -22,7 +22,6 @@ FluidSimParticleConfig :: struct {
 FluidSimPhysicsConfig :: struct {
     gravity:                  f32,
     boundary_damping:         f32,
-    collision_damping:        f32,
     density_smoothing_radius: f32,
     pressure_constant:        f32,
     rest_density:             f32,
@@ -42,7 +41,7 @@ FluidSimState :: struct($N: int) {
     system:                 ^render.CPUParticleSystem,
     particle_cfg:           ^FluidSimParticleConfig,
     physics_cfg:            ^FluidSimPhysicsConfig,
-    bbox:                   BoundingBox(N),
+    bbox:                   ^BoundingBox(N),
 
     // Mouse interaction
     input:                  ^render.Input,
@@ -143,7 +142,7 @@ fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInst
 }
 
 fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^FluidSimParticleConfig, physics_cfg: ^FluidSimPhysicsConfig,
-    bounds: BoundingBox($N), input: ^render.Input, camera: ^CameraData) -> render.ParticleMotion {
+    bounds: ^BoundingBox($N), input: ^render.Input, camera: ^CameraData) -> render.ParticleMotion {
 
     state := new(FluidSimState(N))
     state.system                = system
@@ -426,8 +425,8 @@ fluidsim_run_update_step_sequential :: proc($N: int, sim_state: ^FluidSimState(N
 
             // combine both particles array to get the next pos and vel
             for i in 0..<sim_state.particle_count {
-                sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + sim_state.l2[i])
                 sim_state.position[i] += half_dt * (sim_state.velocity[i] + sim_state.velocities2[i])
+                sim_state.velocity[i] += half_dt * (sim_state.acceleration[i] + sim_state.l2[i])
             }
 
             // resolve boundary collisions

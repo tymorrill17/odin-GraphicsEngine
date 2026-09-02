@@ -84,24 +84,23 @@ main :: proc() {
     defer render.pipeline_destroy(&r, &fluid_material.pipeline)
 
     particle_config := FluidSimParticleConfig{
-        spacing         = 0.01,
-        radius          = 0.1,
-        n_particles     = 100,
+        spacing         = 0.02,
+        radius          = 0.08,
+        n_particles     = 4000,
         default_color   = { 1, 1, 1, 1 },
     }
 
     physics_config := FluidSimPhysicsConfig{
         gravity                     = 9.8,
-        boundary_damping            = 0.9,
-        collision_damping           = 0.9,
-        density_smoothing_radius    = 0.3,
-        pressure_constant           = 20,
-        rest_density                = 5,
-        n_substeps                  = 1,
+        boundary_damping            = 0.95,
+        density_smoothing_radius    = 0.35,
+        pressure_constant           = 500,
+        rest_density                = 55,
+        n_substeps                  = 3,
         time_step                   = 1.0 / 60.0,
         max_time_step               = .25,
-        interaction_strength        = 20,
-        interaction_radius          = 1,
+        interaction_strength        = 90,
+        interaction_radius          = 2,
     }
 
     camera_config := CameraConfig{
@@ -109,11 +108,13 @@ main :: proc() {
         position    = {0, 0, 1},
         near_plane  = 0.1,
         far_plane   = 10000,
-        scale       = 5,
+        scale       = 10,
     };
 
-    half_width  := r.window.aspect_ratio * camera_config.scale * 0.5
-    half_height := camera_config.scale * 0.5
+    boundary_width: f32 = 16.
+    boundary_height: f32 = 9.
+    half_width := boundary_width * 0.5
+    half_height := boundary_height * 0.5
 
     bounding_box := BoundingBox2D{
         min = { -half_width, -half_height },
@@ -122,7 +123,7 @@ main :: proc() {
 
     fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
     // Dimension of the particle motion is inferred from bounding box dimension
-    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, bounding_box, &r.input, &camera_data)
+    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, &bounding_box, &r.input, &camera_data)
     defer render.particle_system_destroy(&fluidsim_particle_system, &r)
     fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
     append(&r.renderables, &fluidsim_render_object)
@@ -151,7 +152,6 @@ main :: proc() {
 		imgui.Begin("Physics Config");
         imgui.DragFloat("Gravity", &physics_config.gravity, 0.01);
         imgui.DragFloat("Boundary Damping Factor", &physics_config.boundary_damping, 0.01);
-        imgui.DragFloat("Collision Damping Factor", &physics_config.collision_damping, 0.01);
         imgui.DragFloat("Smoothing Radius", &physics_config.density_smoothing_radius, 0.01, v_min = 0.1);
         imgui.DragFloat("Pressure Constant", &physics_config.pressure_constant, 0.01);
         imgui.DragFloat("Rest Density", &physics_config.rest_density, 0.01);
@@ -163,6 +163,15 @@ main :: proc() {
             imgui.DragScalar("Substeps", .U32, rawptr(&physics_config.n_substeps), 1, &min);
         }
 		imgui.End();
+
+        imgui.Begin("Boundary")
+        imgui.DragFloat("Width", &boundary_width, 0.2)
+        imgui.DragFloat("Height", &boundary_height, 0.2)
+        bounding_box.max.x = boundary_width * 0.5
+        bounding_box.max.y = boundary_height * 0.5
+        bounding_box.min.x = -bounding_box.max.x
+        bounding_box.min.y = -bounding_box.max.y
+        imgui.End();
 
 		imgui.Begin("Controls");
         if imgui.Button("Start") {
