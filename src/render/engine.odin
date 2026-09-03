@@ -328,11 +328,8 @@ draw :: proc(renderer: ^Renderer) {
     frame_render_fence := renderer.frame_render_fence[frame_index]
     vk.WaitForFences(renderer.logical_device, 1, &frame_render_fence, true, TIMEOUT)
 
-    acquire_next_image(renderer)
-    swapchain_image_index := renderer.swapchain.image_index
+    current_swapchain_image, swapchain_image_index := acquire_next_swapchain_image(renderer)
     renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[swapchain_image_index]
-    vk.ResetFences(renderer.logical_device, 1, &frame_render_fence)
-
     vk.ResetFences(renderer.logical_device, 1, &frame_render_fence)
 
     cmd := renderer.frame_commands[frame_index]
@@ -422,14 +419,14 @@ draw :: proc(renderer: ^Renderer) {
     // Transition images for copying and then presenting
     // Draw image is going to be copied to the swapchain image, so transition it to a transfer source layout
     image_transition(cmd, &renderer.draw_image, .TRANSFER_SRC_OPTIMAL)
-    image_transition(cmd, renderer.swapchain.current_image, .TRANSFER_DST_OPTIMAL) // Swapchain image needs to be transitioned to a transfer destination layout
-    image_copy(cmd, renderer.draw_image, renderer.swapchain.current_image^)
+    image_transition(cmd, current_swapchain_image, .TRANSFER_DST_OPTIMAL) // Swapchain image needs to be transitioned to a transfer destination layout
+    image_copy(cmd, renderer.draw_image, current_swapchain_image^)
     if renderer.capturing_primed do capture_copy_image(cmd, renderer)
 
     gui_draw(renderer)
 
     // Transition swapchain image to a presentation-ready layout
-    image_transition(cmd, renderer.swapchain.current_image, .PRESENT_SRC_KHR)
+    image_transition(cmd, current_swapchain_image, .PRESENT_SRC_KHR)
 
     if vk.EndCommandBuffer(cmd) != .SUCCESS {
         log.panic("Failed to end the draw command buffer!")

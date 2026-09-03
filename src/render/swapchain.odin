@@ -16,7 +16,7 @@ Swapchain :: struct {
 }
 
 @(private)
-acquire_next_image :: proc(renderer: ^Renderer) {
+acquire_next_swapchain_image :: proc(renderer: ^Renderer) -> (swapchain_image: ^Image, swapchain_image_index: u32) {
     result := vk.AcquireNextImageKHR(renderer.logical_device, renderer.swapchain.handle,
                 TIMEOUT, renderer.frame_acquired_image_sem[renderer.frame_index], NULL_HANDLE, &renderer.swapchain.image_index)
     if result == .ERROR_OUT_OF_DATE_KHR || result == .SUBOPTIMAL_KHR {
@@ -26,6 +26,7 @@ acquire_next_image :: proc(renderer: ^Renderer) {
     }
 
     renderer.swapchain.current_image = &renderer.swapchain.images[renderer.swapchain.image_index]
+    return renderer.swapchain.current_image, renderer.swapchain.image_index
 }
 
 @(private)
