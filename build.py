@@ -27,6 +27,9 @@ SHADER_TARGET       = "spirv"
 SHADER_PROFILE      = "spirv_1_6"
 SHADER_EXTRA_ARGS   = ["-fvk-use-entrypoint-name", "-matrix-layout-column-major"]
 
+# Optional Tools Config
+OPTIONAL_TOOLS      = { "ffmpeg": "video recording" }
+
 PROJECT_DIR         = Path(__file__).resolve().parent # Get the project root
 
 shader_path         = PROJECT_DIR / SHADER_DIR
@@ -74,6 +77,12 @@ def generate_ols_json(debug):
 def install_dependencies():
     # TODO
     return
+
+def check_optional_tools():
+    for tool, feature in OPTIONAL_TOOLS.items():
+        if shutil.which(tool) is None:
+            print(f"warning: could not find '{tool}' in PATH, {feature} will not work.")
+
 
 def compile_shaders(debug):
     slangc_path = shutil.which(SHADER_COMPILER)
@@ -191,6 +200,9 @@ def main() -> int:
     if args.generate_ols_json:
         generate_ols_json(args.debug)
         sys.exit(0)
+
+    # Warn about missing non-essential tools, but keep building
+    check_optional_tools()
 
     # Compile shaders
     compile_shaders(args.debug)
