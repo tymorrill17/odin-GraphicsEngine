@@ -31,6 +31,17 @@ timer_update :: proc(timer: ^Timer) {
     timer.last_tick = now
 }
 
+// do an accurate_sleep to make up the remainder of the time left between frames in order to limit the framerate
+timer_limit_framerate :: proc(timer: ^Timer, target_fps: i32) {
+    if target_fps <= 0 do return
+
+    target_frame_time := 1.0 / f64(target_fps)
+    remaining := target_frame_time - time.duration_seconds(time.tick_since(timer.last_tick))
+    if remaining > 0 {
+        time.accurate_sleep(time.Duration(remaining * f64(time.Second)))
+    }
+}
+
 // Just get the time elapsed since last_tick. Don't update the timer info
 timer_time_since_last_tick :: proc(timer: Timer) -> f32 {
     now := time.tick_now()

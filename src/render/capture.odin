@@ -22,6 +22,7 @@ Recorder :: struct {
     resolution: [2]u32,
 }
 
+@(private)
 capture_get_output_filename :: proc(filename: string, extension: string, allocator: runtime.Allocator) -> string {
     right_now := time.now()
     hour, min, sec, nanos := time.precise_clock_from_time(right_now)
@@ -32,6 +33,8 @@ capture_get_output_filename :: proc(filename: string, extension: string, allocat
 // Map the capture_image memory and write the contents to a .png file. capture_image must not be in UNKNOWN layout.
 // Either transition it before this call or call capture_copy_image()
 capture_screenshot :: proc(renderer: ^Renderer) {
+    if !renderer.capturing_primed do return
+
     capture_image := &renderer.capture_image
     capture_extent := renderer.draw_image.extent
 
@@ -48,8 +51,32 @@ capture_screenshot :: proc(renderer: ^Renderer) {
     free_all(context.temp_allocator)
 }
 
-// Copies the draw image to the capture_image
-capture_copy_image :: proc(renderer: ^Renderer) {
+@(private)
+capture_copy_image :: proc(cmd: vk.CommandBuffer, renderer: ^Renderer) {
+    draw_image := &renderer.draw_image
+    capture_image := &renderer.capture_image
+
+    // Default to draw image size if no specific size specified
+    capture_extent: vk.Extent3D = renderer.draw_image.extent
+    recorder_res := vk.Extent3D{ renderer.recorder.resolution.x, renderer.recorder.resolution.y, 1 }
+
+    // Copy the draw image to the capture_image buffer
+    copy_info := vk.BufferImageCopy{
+        bufferOffset        = 0,
+        bufferRowLength     = 0,
+        bufferImageHeight   = 0,
+        imageExtent         = draw_image.extent,
+        imageSubresource    = {
+            aspectMask  = draw_image.aspect_flags,
+            mipLevel    = 0,
+            layerCount  = 1,
+        },
+    }
+    vk.CmdCopyImageToBuffer(cmd, draw_image.handle, draw_image.layout, capture_image.handle, 1, &copy_info)
+}
+// Copies the draw image to the capture_image immediately
+@(private)
+capture_copy_image_now :: proc(renderer: ^Renderer) {
     draw_image := &renderer.draw_image
     capture_image := &renderer.capture_image
 
@@ -92,7 +119,7 @@ capture_copy_image :: proc(renderer: ^Renderer) {
 
 // Initialize the ffmpeg process
 capture_start_recording :: proc(renderer: ^Renderer) {
-    if renderer.recorder.recording do return
+    if !renderer.capturing_primed || renderer.recorder.recording do return
 
     renderer.recorder.resolution = { renderer.draw_image.extent.width, renderer.draw_image.extent.height }
 
@@ -104,7 +131,7 @@ capture_start_recording :: proc(renderer: ^Renderer) {
 
     args := []string {
         "ffmpeg",
-        "-loglevel", "verbose",
+        "-loglevel", "info",
         "-y",
 
         "-f", "rawvideo",
@@ -151,7 +178,7 @@ capture_start_recording :: proc(renderer: ^Renderer) {
 }
 
 capture_end_recording :: proc(renderer: ^Renderer) {
-    if !renderer.recorder.recording do return
+    if !renderer.recorder.recording || !renderer.capturing_primed do return
 
     recorder := &renderer.recorder
     renderer.recorder.recording = false
@@ -172,7 +199,10 @@ capture_end_recording :: proc(renderer: ^Renderer) {
     log.infof("Recording Ended.")
 }
 
+@(private)
 capture_send_recorded_image :: proc(renderer: ^Renderer) {
+    if !renderer.capturing_primed do return
+
     recorder := &renderer.recorder
     capture_image := &renderer.capture_image
     capture_extent: vk.Extent3D = renderer.draw_image.extent

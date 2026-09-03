@@ -110,9 +110,13 @@ Renderer :: struct {
     render_scale:               f32,
     draw_gui:                   bool,
 
+    capturing_primed:           bool,
     capture_image:              Buffer,
     screenshot_requested:       bool,
     recorder:                   Recorder,
+
+    timer:                      Timer,
+    frame_time:                 f32,    // Seconds the frame should advance the simulation by
 }
 
 renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
@@ -197,14 +201,15 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.render_scale = 1
     renderer.frame_index  = 0
     renderer.frame_number = 0
+    renderer.timer = timer_create()
 
     renderer.current_acquired_image_sem = &renderer.frame_acquired_image_sem[renderer.frame_index]
     renderer.current_render_fence       = &renderer.frame_render_fence[renderer.frame_index]
     renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[renderer.swapchain.image_index]
     renderer.current_command            = &renderer.frame_commands[renderer.frame_index]
 
-    // Create a host-visible image to copy the draw image to for capturing screenshots
-    // renderer.capture_image = image_create_host(renderer, renderer.draw_image.extent, renderer.draw_image.format, { .TRANSFER_DST, .COLOR_ATTACHMENT })
+    // Create a buffer to copy the draw image to for capturing screenshots
+    renderer.capturing_primed = false
     renderer.capture_image = buffer_create(renderer, image_get_size(renderer.draw_image.extent), 1, { .TRANSFER_DST }, .GPU_TO_CPU)
     renderer.screenshot_requested = false
     renderer.recorder = {
@@ -291,6 +296,13 @@ start_frame :: proc(renderer: ^Renderer) {
     gui_start_frame()
     input_update(renderer)
     process_inputs(renderer)
+    timer_update(&renderer.timer)
+
+    if renderer.recorder.recording && renderer.recorder.framerate > 0 {
+        renderer.frame_time = 1.0 / f32(renderer.recorder.framerate)
+    } else {
+        renderer.frame_time = renderer.timer.frame_time
+    }
 }
 
 process_inputs :: proc(renderer: ^Renderer) {
@@ -412,6 +424,7 @@ draw :: proc(renderer: ^Renderer) {
     image_transition(cmd, &renderer.draw_image, .TRANSFER_SRC_OPTIMAL)
     image_transition(cmd, renderer.swapchain.current_image, .TRANSFER_DST_OPTIMAL) // Swapchain image needs to be transitioned to a transfer destination layout
     image_copy(cmd, renderer.draw_image, renderer.swapchain.current_image^)
+    if renderer.capturing_primed do capture_copy_image(cmd, renderer)
 
     gui_draw(renderer)
 
@@ -422,8 +435,8 @@ draw :: proc(renderer: ^Renderer) {
         log.panic("Failed to end the draw command buffer!")
     }
 
-    if renderer.screenshot_requested || renderer.recorder.recording {
-        capture_copy_image(renderer)
+    if renderer.capturing_primed {
+        // capture_copy_image_now(renderer)
         if renderer.screenshot_requested {
             capture_screenshot(renderer)
         }
@@ -447,6 +460,10 @@ draw :: proc(renderer: ^Renderer) {
     renderer.current_acquired_image_sem = &renderer.frame_acquired_image_sem[renderer.frame_index]
     renderer.current_render_fence       = &renderer.frame_render_fence[renderer.frame_index]
     renderer.current_command            = &renderer.frame_commands[renderer.frame_index]
+
+    if renderer.recorder.recording {
+        timer_limit_framerate(&renderer.timer, renderer.recorder.framerate)
+    }
 }
 
 resize_callback :: proc(renderer: ^Renderer) {
@@ -456,6 +473,9 @@ resize_callback :: proc(renderer: ^Renderer) {
         swapchain_recreate(renderer)
         image_recreate(renderer, &renderer.draw_image, vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1 })
         image_recreate(renderer, &renderer.depth_image, vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1 })
+        if renderer.recorder.recording do capture_end_recording(renderer)
+        buffer_destroy(renderer, &renderer.capture_image)
+        renderer.capture_image = buffer_create(renderer, image_get_size(renderer.draw_image.extent), 1, { .TRANSFER_DST }, .GPU_TO_CPU)
         renderer.window.resized = false // swapchain and draw images remade, resize was handled
     }
 }

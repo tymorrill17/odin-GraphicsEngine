@@ -128,12 +128,10 @@ main :: proc() {
     fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
     append(&r.renderables, &fluidsim_render_object)
 
-    timer := render.timer_create()
     recording_timer := render.timer_create()
 
     for !render.window_should_close(&r) {
         render.start_frame(&r)
-        render.timer_update(&timer)
 
 		imgui.Begin("Camera Config");
         imgui.DragFloat3("Position", &camera_config.position, 0.1);
@@ -184,8 +182,8 @@ main :: proc() {
 		imgui.End();
 
 		imgui.Begin("Metrics");
-        imgui.Text("FPS: %f", timer.fps)
-        imgui.Text("Frame Time: %f", timer.avg_frame_time)
+        imgui.Text("FPS: %f", r.timer.fps)
+        imgui.Text("Frame Time: %f", r.timer.avg_frame_time)
         {
             mouse_world := render.mouse_world_position_from_viewproj(&r.input, camera_data.viewproj)
             imgui.Text("Mouse Screen: %.1f, %.1f", r.input.mouse_position.x, r.input.mouse_position.y)
@@ -194,8 +192,10 @@ main :: proc() {
 		imgui.End();
 
         imgui.Begin("Screen Capture")
+        if imgui.Button(r.capturing_primed ? "Stand Down" : "Prime") do r.capturing_primed = r.capturing_primed ? false : true
         if imgui.Button("Take Screenshot") do r.screenshot_requested = true
         if !r.recorder.recording {
+            imgui.InputScalar("Framerate", .S32, &r.recorder.framerate)
             if imgui.Button("Start Recording") do render.capture_start_recording(&r)
             render.timer_update(&recording_timer)
         } else {
@@ -213,8 +213,8 @@ main :: proc() {
         camera_data.viewproj = camera_data.proj * camera_data.view
         render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame
 
-        // Update fluidsim particles
-        render.particle_system_update(&fluidsim_particle_system, &r, timer.frame_time)
+        // Update fluidsim particles.
+        render.particle_system_update(&fluidsim_particle_system, &r, r.frame_time)
 
         render.draw(&r)
     }
