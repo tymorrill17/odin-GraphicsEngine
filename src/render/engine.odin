@@ -110,9 +110,9 @@ Renderer :: struct {
     render_scale:               f32,
     draw_gui:                   bool,
 
-    capture_image:              Image,
+    capture_image:              Buffer,
     screenshot_requested:       bool,
-    screenshot_resolution:      [2]u32,
+    recorder:                   Recorder,
 }
 
 renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
@@ -204,9 +204,14 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.current_command            = &renderer.frame_commands[renderer.frame_index]
 
     // Create a host-visible image to copy the draw image to for capturing screenshots
-    renderer.capture_image = image_create_host(renderer, renderer.draw_image.extent, renderer.draw_image.format, { .TRANSFER_DST, .COLOR_ATTACHMENT })
+    // renderer.capture_image = image_create_host(renderer, renderer.draw_image.extent, renderer.draw_image.format, { .TRANSFER_DST, .COLOR_ATTACHMENT })
+    renderer.capture_image = buffer_create(renderer, image_get_size(renderer.draw_image.extent), 1, { .TRANSFER_DST }, .GPU_TO_CPU)
     renderer.screenshot_requested = false
-    renderer.screenshot_resolution = { renderer.capture_image.extent.width, renderer.capture_image.extent.height }
+    renderer.recorder = {
+        recording = false,
+        framerate = renderer.window.glfw_mode.refresh_rate, // By default
+        resolution = { renderer.draw_image.extent.width, renderer.draw_image.extent.height }
+    }
 
     // initialize the debug gui
     gui_initialize(renderer)
@@ -218,7 +223,8 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
 
     gui_destroy(renderer)
 
-    image_destroy(renderer, &renderer.capture_image)
+    // image_destroy(renderer, &renderer.capture_image)
+    buffer_destroy(renderer, &renderer.capture_image)
 
     delete(renderer.scene_buffers)
     delete(renderer.scene_descriptor_layouts)
@@ -293,6 +299,13 @@ process_inputs :: proc(renderer: ^Renderer) {
     }
     if renderer.input.key_states[.f12].pressed {
         renderer.screenshot_requested = true
+    }
+    if renderer.input.key_states[.r].pressed {
+        if !renderer.recorder.recording {
+            capture_start_recording(renderer)
+        } else {
+            capture_end_recording(renderer)
+        }
     }
 }
 
@@ -409,6 +422,17 @@ draw :: proc(renderer: ^Renderer) {
         log.panic("Failed to end the draw command buffer!")
     }
 
+    if renderer.screenshot_requested || renderer.recorder.recording {
+        capture_copy_image(renderer)
+        if renderer.screenshot_requested {
+            capture_screenshot(renderer)
+        }
+        if renderer.recorder.recording {
+            // Send the capture_image to the ffmpeg process
+            capture_send_recorded_image(renderer)
+        }
+    }
+
     present_queue := renderer.queues[.present]
     submit_to_queue(renderer, cmd, present_queue,
         renderer.frame_acquired_image_sem[frame_index],
@@ -416,11 +440,6 @@ draw :: proc(renderer: ^Renderer) {
         renderer.frame_render_fence[frame_index]
     )
     present_to_screen(renderer, present_queue, &renderer.swapchain_render_sem[swapchain_image_index])
-
-    if renderer.screenshot_requested {
-        capture_screenshot(renderer)
-        renderer.screenshot_requested = false
-    }
 
     renderer.frame_number += 1
     renderer.frame_index = u32(renderer.frame_number % u64(renderer.frames_in_flight))

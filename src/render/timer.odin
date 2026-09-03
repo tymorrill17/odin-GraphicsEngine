@@ -3,11 +3,11 @@ package render
 import "core:time"
 
 Timer :: struct {
-    last_tick:   time.Tick, // Very first tick
-    frame_time:     f32, // Seconds since last frame
-    fps:            f32, // Smoothed frame_time
-    avg_frame_time: f32, // Smoothed frames-per-second
-    smoothing:      f32, // Factor by which to smooth fps and avg frame time
+    last_tick:      time.Tick,
+    frame_time:     f32,        // Seconds since last frame
+    fps:            f32,        // Smoothed frame_time
+    avg_frame_time: f32,        // Smoothed frames-per-second
+    smoothing:      f32,        // Factor by which to smooth fps and avg frame time
 }
 
 timer_create :: proc(fps_smoothing: f32 = 0.9) -> Timer {
@@ -29,5 +29,11 @@ timer_update :: proc(timer: ^Timer) {
     }
 
     timer.last_tick = now
+}
+
+// Just get the time elapsed since last_tick. Don't update the timer info
+timer_time_since_last_tick :: proc(timer: Timer) -> f32 {
+    now := time.tick_now()
+    return f32(time.duration_seconds(time.tick_diff(timer.last_tick, now)))
 }
 

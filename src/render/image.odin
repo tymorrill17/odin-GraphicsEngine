@@ -272,6 +272,10 @@ image_copy_data_to_image_now :: proc(renderer: ^Renderer, image: ^Image, data: r
     buffer_destroy(renderer, &upload_buffer)
 }
 
+image_get_size :: proc(image_extent: vk.Extent3D, n_channels: int = 4) -> u64 { // rgba -> 4 channels by default
+    return u64(image_extent.height) * u64(image_extent.width) * u64(image_extent.depth) * u64(n_channels)
+}
+
 @(private)
 color_attachment_info_struct :: proc(image: Image, clear_value: ^vk.ClearValue) -> vk.RenderingAttachmentInfoKHR {
     return vk.RenderingAttachmentInfoKHR{

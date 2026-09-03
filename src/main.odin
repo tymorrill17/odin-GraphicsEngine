@@ -129,6 +129,7 @@ main :: proc() {
     append(&r.renderables, &fluidsim_render_object)
 
     timer := render.timer_create()
+    recording_timer := render.timer_create()
 
     for !render.window_should_close(&r) {
         render.start_frame(&r)
@@ -192,9 +193,15 @@ main :: proc() {
         }
 		imgui.End();
 
-        imgui.Begin("Capture")
-        imgui.InputScalarN("Resolution", .U32, &r.screenshot_resolution, 2)
+        imgui.Begin("Screen Capture")
         if imgui.Button("Take Screenshot") do r.screenshot_requested = true
+        if !r.recorder.recording {
+            if imgui.Button("Start Recording") do render.capture_start_recording(&r)
+            render.timer_update(&recording_timer)
+        } else {
+            if imgui.Button("Stop Recording") do render.capture_end_recording(&r)
+            imgui.Text("Elapsed Time: %f", render.timer_time_since_last_tick(recording_timer))
+        }
         imgui.End()
 
         aspect_ratio := r.window.aspect_ratio
