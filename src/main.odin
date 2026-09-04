@@ -193,7 +193,7 @@ main :: proc() {
 
         imgui.Begin("Screen Capture")
         if imgui.Button(r.capturing_primed ? "Stand Down" : "Prime") do r.capturing_primed = r.capturing_primed ? false : true
-        if imgui.Button("Take Screenshot") do r.screenshot_requested = true
+        if imgui.Button("Take Screenshot") do render.capture_request_screenshot(&r)
         if !r.recorder.recording {
             imgui.InputScalar("Framerate", .S32, &r.recorder.framerate)
             if imgui.Button("Start Recording") do render.capture_start_recording(&r)

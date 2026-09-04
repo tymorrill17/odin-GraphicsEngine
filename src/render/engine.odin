@@ -111,8 +111,6 @@ Renderer :: struct {
     draw_gui:                   bool,
 
     capturing_primed:           bool,
-    capture_image:              Buffer,
-    screenshot_requested:       bool,
     recorder:                   Recorder,
 
     timer:                      Timer,
@@ -210,14 +208,7 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
 
     // Create a buffer to copy the draw image to for capturing screenshots
     renderer.capturing_primed = false
-    renderer.capture_image = buffer_create(renderer, image_get_size(renderer.draw_image.extent), 1, { .TRANSFER_DST }, .GPU_TO_CPU)
-    renderer.screenshot_requested = false
-    renderer.recorder = {
-        recording = false,
-        framerate = renderer.window.glfw_mode.refresh_rate, // By default
-        resolution = { renderer.draw_image.extent.width, renderer.draw_image.extent.height }
-    }
-
+    recorder_initialize(renderer, &renderer.recorder)
     // initialize the debug gui
     gui_initialize(renderer)
     renderer.draw_gui = true
@@ -228,8 +219,7 @@ renderer_shutdown :: proc(renderer: ^Renderer) {
 
     gui_destroy(renderer)
 
-    // image_destroy(renderer, &renderer.capture_image)
-    buffer_destroy(renderer, &renderer.capture_image)
+    recorder_destroy(renderer, &renderer.recorder)
 
     delete(renderer.scene_buffers)
     delete(renderer.scene_descriptor_layouts)
@@ -310,7 +300,7 @@ process_inputs :: proc(renderer: ^Renderer) {
         renderer.draw_gui = renderer.draw_gui ? false : true
     }
     if renderer.input.key_states[.f12].pressed {
-        renderer.screenshot_requested = true
+        capture_request_screenshot(renderer)
     }
     if renderer.input.key_states[.r].pressed {
         if !renderer.recorder.recording {
@@ -434,7 +424,7 @@ draw :: proc(renderer: ^Renderer) {
 
     if renderer.capturing_primed {
         // capture_copy_image_now(renderer)
-        if renderer.screenshot_requested {
+        if renderer.recorder.screenshot_requested {
             capture_screenshot(renderer)
         }
         if renderer.recorder.recording {
@@ -471,8 +461,7 @@ resize_callback :: proc(renderer: ^Renderer) {
         image_recreate(renderer, &renderer.draw_image, vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1 })
         image_recreate(renderer, &renderer.depth_image, vk.Extent3D{ u32(renderer.window.draw_extent.x), u32(renderer.window.draw_extent.y), 1 })
         if renderer.recorder.recording do capture_end_recording(renderer)
-        buffer_destroy(renderer, &renderer.capture_image)
-        renderer.capture_image = buffer_create(renderer, image_get_size(renderer.draw_image.extent), 1, { .TRANSFER_DST }, .GPU_TO_CPU)
+        recorder_resize_buffers(renderer, &renderer.recorder)
         renderer.window.resized = false // swapchain and draw images remade, resize was handled
     }
 }

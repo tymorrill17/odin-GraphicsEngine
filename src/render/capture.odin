@@ -15,11 +15,43 @@ CAPTURE_DIR :: #config(CAPTURE_DIR, ".")
 NUM_CHANNELS :: 4
 
 Recorder :: struct {
-    process:    os.Process,
-    pipe:       ^os.File,
-    framerate:  i32,
-    recording:  bool,
-    resolution: [2]u32,
+    process:                os.Process,
+    pipe:                   ^os.File,
+    framerate:              i32,
+    recording:              bool,
+    screenshot_requested:   bool,
+    resolution:             [2]u32,
+    capture_buffers:        []Buffer,
+}
+
+recorder_initialize :: proc(renderer: ^Renderer, recorder: ^Recorder) {
+    recorder^ = {
+        recording = false,
+        screenshot_requested = false,
+        framerate = renderer.window.glfw_mode.refresh_rate, // By default
+        resolution = { renderer.draw_image.extent.width, renderer.draw_image.extent.height }
+    }
+    recorder.capture_buffers = make([]Buffer, renderer.frames_in_flight)
+    buffer_size := image_get_size(renderer.draw_image.extent)
+    for &buffer in recorder.capture_buffers {
+        buffer = buffer_create(renderer, buffer_size, 1, { .TRANSFER_DST }, .GPU_TO_CPU)
+    }
+}
+
+recorder_destroy :: proc(renderer: ^Renderer, recorder: ^Recorder) {
+    for &buffer in recorder.capture_buffers {
+        buffer_destroy(renderer, &buffer)
+    }
+    delete(recorder.capture_buffers)
+    recorder^ = {}
+}
+
+recorder_resize_buffers :: proc(renderer: ^Renderer, recorder: ^Recorder) {
+    new_size := image_get_size(renderer.draw_image.extent)
+    for &buffer in recorder.capture_buffers {
+        buffer_destroy(renderer, &buffer)
+        buffer = buffer_create(renderer, new_size, 1, { .TRANSFER_DST }, .GPU_TO_CPU)
+    }
 }
 
 @(private)
@@ -30,23 +62,28 @@ capture_get_output_filename :: proc(filename: string, extension: string, allocat
     return fmt.aprintf("%s-%d-%2d-%2d_%2d:%2d:%2d:%9d%s", filename, year, month, day, hour, min, sec, nanos, extension, allocator=allocator)
 }
 
-// Map the capture_image memory and write the contents to a .png file. capture_image must not be in UNKNOWN layout.
+capture_request_screenshot :: proc(renderer: ^Renderer) {
+    if !renderer.capturing_primed do return
+    renderer.recorder.screenshot_requested = true
+}
+
+// Map the capture_buffer memory and write the contents to a .png file. capture_buffer must not be in UNKNOWN layout.
 // Either transition it before this call or call capture_copy_image()
 capture_screenshot :: proc(renderer: ^Renderer) {
     if !renderer.capturing_primed do return
 
-    capture_image := &renderer.capture_image
+    capture_buffer := &renderer.recorder.capture_buffers[renderer.frame_index]
     capture_extent := renderer.draw_image.extent
 
     filename             := capture_get_output_filename("screenshot", ".png", context.temp_allocator)
     complete_filepath, _ := filepath.join({CAPTURE_DIR, filename}, context.temp_allocator)
     complete_filepath_c  := strings.clone_to_cstring(complete_filepath, context.temp_allocator)
 
-    buffer_map(renderer, capture_image)
-    stbi.write_png(complete_filepath_c, i32(capture_extent.width), i32(capture_extent.height), NUM_CHANNELS, capture_image.data_ptr, 0)
-    buffer_unmap(renderer, capture_image)
+    buffer_map(renderer, capture_buffer)
+    stbi.write_png(complete_filepath_c, i32(capture_extent.width), i32(capture_extent.height), NUM_CHANNELS, capture_buffer.data_ptr, 0)
+    buffer_unmap(renderer, capture_buffer)
     log.infof("Saved screenshot: %s", filename)
-    renderer.screenshot_requested = false
+    renderer.recorder.screenshot_requested = false
 
     free_all(context.temp_allocator)
 }
@@ -54,13 +91,13 @@ capture_screenshot :: proc(renderer: ^Renderer) {
 @(private)
 capture_copy_image :: proc(cmd: vk.CommandBuffer, renderer: ^Renderer) {
     draw_image := &renderer.draw_image
-    capture_image := &renderer.capture_image
+    capture_buffer := &renderer.recorder.capture_buffers[renderer.frame_index]
 
     // Default to draw image size if no specific size specified
     capture_extent: vk.Extent3D = renderer.draw_image.extent
     recorder_res := vk.Extent3D{ renderer.recorder.resolution.x, renderer.recorder.resolution.y, 1 }
 
-    // Copy the draw image to the capture_image buffer
+    // Copy the draw image to the capture_buffer buffer
     copy_info := vk.BufferImageCopy{
         bufferOffset        = 0,
         bufferRowLength     = 0,
@@ -72,13 +109,13 @@ capture_copy_image :: proc(cmd: vk.CommandBuffer, renderer: ^Renderer) {
             layerCount  = 1,
         },
     }
-    vk.CmdCopyImageToBuffer(cmd, draw_image.handle, draw_image.layout, capture_image.handle, 1, &copy_info)
+    vk.CmdCopyImageToBuffer(cmd, draw_image.handle, draw_image.layout, capture_buffer.handle, 1, &copy_info)
 }
-// Copies the draw image to the capture_image immediately
+// Copies the draw image to the capture_buffer immediately
 @(private)
 capture_copy_image_now :: proc(renderer: ^Renderer) {
     draw_image := &renderer.draw_image
-    capture_image := &renderer.capture_image
+    capture_buffer := &renderer.recorder.capture_buffers[renderer.frame_index]
 
     // Default to draw image size if no specific size specified
     capture_extent: vk.Extent3D = renderer.draw_image.extent
@@ -87,20 +124,20 @@ capture_copy_image_now :: proc(renderer: ^Renderer) {
 
     if capture_extent != recorder_res {
         if renderer.recorder.recording do capture_end_recording(renderer)
-        buffer_destroy(renderer, capture_image)
-        capture_image^ = buffer_create(renderer, image_get_size(capture_extent), 1, { .TRANSFER_DST }, .GPU_TO_CPU)
+        buffer_destroy(renderer, capture_buffer)
+        capture_buffer^ = buffer_create(renderer, image_get_size(capture_extent), 1, { .TRANSFER_DST }, .GPU_TO_CPU)
     }
 
-    // Copy the draw image to the capture_image buffer
-    CommandCtx :: struct{ draw_image: Image, capture_image: Buffer}
+    // Copy the draw image to the capture_buffer buffer
+    CommandCtx :: struct{ draw_image: Image, capture_buffer: Buffer}
     copy_command_ctx := CommandCtx{
         draw_image = draw_image^,
-        capture_image = capture_image^,
+        capture_buffer = capture_buffer^,
     }
     immediate_command_submit(renderer, &copy_command_ctx, proc(cmd: vk.CommandBuffer, user_data: rawptr) {
         ctx := (^CommandCtx)(user_data)
         draw_image := ctx.draw_image
-        capture_image := ctx.capture_image
+        capture_buffer := ctx.capture_buffer
         copy_info := vk.BufferImageCopy{
             bufferOffset        = 0,
             bufferRowLength     = 0,
@@ -112,7 +149,7 @@ capture_copy_image_now :: proc(renderer: ^Renderer) {
                 layerCount  = 1,
             },
         }
-        vk.CmdCopyImageToBuffer(cmd, draw_image.handle, draw_image.layout, capture_image.handle, 1, &copy_info)
+        vk.CmdCopyImageToBuffer(cmd, draw_image.handle, draw_image.layout, capture_buffer.handle, 1, &copy_info)
     })
 
 }
@@ -204,13 +241,13 @@ capture_send_recorded_image :: proc(renderer: ^Renderer) {
     if !renderer.capturing_primed do return
 
     recorder := &renderer.recorder
-    capture_image := &renderer.capture_image
+    capture_buffer := &renderer.recorder.capture_buffers[renderer.frame_index]
     capture_extent: vk.Extent3D = renderer.draw_image.extent
 
-    buffer_map(renderer, capture_image)
+    buffer_map(renderer, capture_buffer)
 
     total_bytes := int(image_get_size(capture_extent))
-    image_data_ptr := mem.slice_ptr((^u8)(capture_image.data_ptr), total_bytes)
+    image_data_ptr := mem.slice_ptr((^u8)(capture_buffer.data_ptr), total_bytes)
 
     // Pipe writes go short as soon as the pipe buffer fills, which at 8 MB a frame is
     // every frame, so loop until the whole thing is out.
@@ -223,5 +260,5 @@ capture_send_recorded_image :: proc(renderer: ^Renderer) {
         }
         written += bytes_written
     }
-    buffer_unmap(renderer, capture_image)
+    buffer_unmap(renderer, capture_buffer)
 }
