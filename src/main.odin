@@ -14,7 +14,8 @@ requested_validation_layers : []cstring : {
 
 requested_device_extensions : []cstring : {
     "VK_KHR_swapchain", // Necessary extension to use swapchains
-    "VK_GOOGLE_user_type"
+    "VK_GOOGLE_user_type",
+    "VK_KHR_present_mode_fifo_latest_ready",
 }
 
 CameraConfig :: struct{
@@ -192,7 +193,6 @@ main :: proc() {
 		imgui.End();
 
         imgui.Begin("Screen Capture")
-        if imgui.Button(r.capturing_primed ? "Stand Down" : "Prime") do r.capturing_primed = r.capturing_primed ? false : true
         if imgui.Button("Take Screenshot") do render.capture_request_screenshot(&r)
         if !r.recorder.recording {
             imgui.InputScalar("Framerate", .S32, &r.recorder.framerate)

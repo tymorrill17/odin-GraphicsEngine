@@ -43,6 +43,12 @@ device_features_13 := vk.PhysicalDeviceVulkan13Features{ sType = .PHYSICAL_DEVIC
     dynamicRendering                = true,
     shaderDemoteToHelperInvocation  = true,
 }
+device_features_14 := vk.PhysicalDeviceVulkan14Features{ sType = .PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+
+}
+fifo_latest_ready_feature := vk.PhysicalDevicePresentModeFifoLatestReadyFeaturesKHR{ sType = .PHYSICAL_DEVICE_PRESENT_MODE_FIFO_LATEST_READY_FEATURES_KHR,
+    presentModeFifoLatestReady = true
+}
 
 pool_size_ratios :: []PoolSizeRatio{
     {vk.DescriptorType.UNIFORM_BUFFER,         100},
@@ -67,6 +73,7 @@ RendererConfig :: struct {
 }
 
 Renderer :: struct {
+    cfg:                        RendererConfig,
     window:                     Window,
     input:                      Input,
     instance:                   vk.Instance,
@@ -110,7 +117,6 @@ Renderer :: struct {
     render_scale:               f32,
     draw_gui:                   bool,
 
-    capturing_primed:           bool,
     recorder:                   Recorder,
 
     timer:                      Timer,
@@ -141,6 +147,8 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     vk.load_proc_addresses_global(get_instance_proc_addr)
     assert(vk.CreateInstance != nil, "Vulkan procs not loaded!")
     glob_vk_lib.get_instance_proc_addr = (vk.ProcGetInstanceProcAddr)(get_instance_proc_addr)
+
+    renderer.cfg = renderer_cfg
 
     renderer.window = window_create(renderer_cfg.extent.x, renderer_cfg.extent.y, renderer_cfg.app_name)
     window_set_callbacks(renderer)
@@ -207,7 +215,6 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.current_command            = &renderer.frame_commands[renderer.frame_index]
 
     // Create a buffer to copy the draw image to for capturing screenshots
-    renderer.capturing_primed = false
     recorder_initialize(renderer, &renderer.recorder)
     // initialize the debug gui
     gui_initialize(renderer)
@@ -318,6 +325,10 @@ draw :: proc(renderer: ^Renderer) {
     frame_render_fence := renderer.frame_render_fence[frame_index]
     vk.WaitForFences(renderer.logical_device, 1, &frame_render_fence, true, TIMEOUT)
 
+    // Signal the capture thread that it is ready to do its thing
+    // We need to fill the slot first
+    capture_ready_to_send(&renderer.recorder)
+
     current_swapchain_image, swapchain_image_index := acquire_next_swapchain_image(renderer)
     renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[swapchain_image_index]
     vk.ResetFences(renderer.logical_device, 1, &frame_render_fence)
@@ -411,7 +422,7 @@ draw :: proc(renderer: ^Renderer) {
     image_transition(cmd, &renderer.draw_image, .TRANSFER_SRC_OPTIMAL)
     image_transition(cmd, current_swapchain_image, .TRANSFER_DST_OPTIMAL) // Swapchain image needs to be transitioned to a transfer destination layout
     image_copy(cmd, renderer.draw_image, current_swapchain_image^)
-    if renderer.capturing_primed do capture_copy_image(cmd, renderer)
+    capture_copy_image(cmd, renderer)
 
     gui_draw(renderer)
 
@@ -422,16 +433,7 @@ draw :: proc(renderer: ^Renderer) {
         log.panic("Failed to end the draw command buffer!")
     }
 
-    if renderer.capturing_primed {
-        // capture_copy_image_now(renderer)
-        if renderer.recorder.screenshot_requested {
-            capture_screenshot(renderer)
-        }
-        if renderer.recorder.recording {
-            // Send the capture_image to the ffmpeg process
-            capture_send_recorded_image(renderer)
-        }
-    }
+    capture_wait_on_send(&renderer.recorder)
 
     present_queue := renderer.queues[.present]
     submit_to_queue(renderer, cmd, present_queue,
@@ -644,6 +646,8 @@ devices_initialize :: proc(renderer: ^Renderer, request_discrete_GPU: bool, requ
     }
     device_features_11.pNext = &device_features_12
     device_features_12.pNext = &device_features_13
+    device_features_13.pNext = &device_features_14
+    device_features_14.pNext = &fifo_latest_ready_feature
 
     device_create_info := vk.DeviceCreateInfo{
         sType                   = .DEVICE_CREATE_INFO,

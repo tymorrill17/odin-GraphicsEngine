@@ -90,9 +90,16 @@ swapchain_create :: proc(renderer: ^Renderer) {
         }
     }
     for mode in present_modes {
-        if mode == vk.PresentModeKHR.MAILBOX {
-            present_mode = mode
-            break
+        when ODIN_OS == .Windows {
+            if mode == vk.PresentModeKHR.MAILBOX {
+                present_mode = mode
+                break
+            }
+        } else {
+            if mode == vk.PresentModeKHR.FIFO_LATEST_READY {
+                present_mode = mode
+                break
+            }
         }
     }
 
