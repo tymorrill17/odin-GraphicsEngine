@@ -24,7 +24,7 @@ CPUParticleSystem :: struct {
     max_particles:                  u32,
     particle_buffers:               []Buffer,           // Buffer containing particle instances
     particle_buffer_addrs:          []vk.DeviceAddress, // What we actually send to the GPU
-    current_particle_buffer_addr:   ^vk.DeviceAddress,  // Always points to the current in-use particle buffer address
+    current_particle_buffer_addr:   vk.DeviceAddress,  // Always points to the current in-use particle buffer address
     mesh:                           ^MeshAsset,         // Geometry to use for the particles
     material:                       ^MaterialInstance,  // Material pipeline to use for the rendered particles
     transform:                      float4x4,
@@ -38,7 +38,7 @@ particle_system_get_render_object :: proc(system: ^CPUParticleSystem) -> RenderO
         material                = system.material,
         transform               = &system.transform,
         vertex_buffer_addr      = system.mesh.mesh_buffers.vertex_buffer_addr,
-        instance_buffer_addr    = system.current_particle_buffer_addr,
+        instance_buffer_addr    = &system.current_particle_buffer_addr,
         instance_count          = &system.particle_count,
     }
 }
@@ -58,7 +58,6 @@ particle_system_create :: proc(renderer: ^Renderer, max_particles: u32, origin: 
     system.particle_buffers      = make([]Buffer, renderer.frames_in_flight)
     system.particle_buffer_addrs = make([]vk.DeviceAddress, renderer.frames_in_flight)
 
-    system.current_particle_buffer_addr = &system.particle_buffer_addrs[renderer.frame_index]
     for i in 0..<renderer.frames_in_flight {
         system.particle_buffers[i] = buffer_create(renderer, size_of(ParticleInstance), u64(max_particles), { .STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS }, .CPU_TO_GPU)
         addr_info := vk.BufferDeviceAddressInfo{
@@ -68,6 +67,7 @@ particle_system_create :: proc(renderer: ^Renderer, max_particles: u32, origin: 
         system.particle_buffer_addrs[i] = vk.GetBufferDeviceAddress(renderer.logical_device, &addr_info)
         buffer_map(renderer, &system.particle_buffers[i])
     }
+    system.current_particle_buffer_addr = system.particle_buffer_addrs[renderer.frame_index]
 
     return system
 }
@@ -77,7 +77,7 @@ particle_system_update :: proc(system: ^CPUParticleSystem, renderer: ^Renderer, 
         system.motion.update(system, dt)
     }
     buffer_write_data(renderer, &system.particle_buffers[renderer.frame_index], raw_data(system.particles), size = u64(system.particle_count) * size_of(ParticleInstance))
-    system.current_particle_buffer_addr = &system.particle_buffer_addrs[renderer.frame_index]
+    system.current_particle_buffer_addr = system.particle_buffer_addrs[renderer.frame_index]
 }
 
 particle_system_destroy :: proc(system: ^CPUParticleSystem, renderer: ^Renderer) {
