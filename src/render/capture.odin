@@ -13,6 +13,7 @@ import "base:runtime"
 
 CAPTURE_DIR :: #config(CAPTURE_DIR, ".")
 NUM_CHANNELS :: 4
+g_ffmpeg_quality: i32 = 20
 
 Recorder :: struct {
     process:                os.Process,
@@ -163,6 +164,7 @@ capture_start_recording :: proc(renderer: ^Renderer) {
     recorder := &renderer.recorder
     resolution := fmt.aprintf("%dx%d", renderer.recorder.resolution.x, renderer.recorder.resolution.y, allocator=context.temp_allocator)
     framerate  := fmt.aprintf("%d", recorder.framerate, allocator=context.temp_allocator)
+    quality    := fmt.aprintf("%d", g_ffmpeg_quality, allocator=context.temp_allocator)
 
     filename := capture_get_output_filename("recording", ".mp4", context.temp_allocator)
 
@@ -178,10 +180,12 @@ capture_start_recording :: proc(renderer: ^Renderer) {
         "-i", "-",
 
         "-c:v", "libx264",
-        "-vb", "2500k",
-        "-c:a", "aac",
-        "-ab", "200k",
+        "-crf", quality, // Quality level
+        "-vf", "scale=out_color_matrix=bt709:out_range=tv",
         "-pix_fmt", "yuv420p",
+        "-colorspace", "bt709", "-color_primaries", "bt709",
+        "-color_trc", "bt709", "-color_range", "tv",
+        "-movflags", "+faststart",
         filename,
     }
 

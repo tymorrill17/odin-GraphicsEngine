@@ -352,17 +352,17 @@ fluidsim_run_update_step_parallel2 :: proc($N: int, sim_state: ^FluidSimState(N)
     first, last := get_worker_index_range(sim_state.particle_count, worker_index, sim_state.n_worker_threads)
 
     sub_dt := sim_state.physics_cfg.time_step / f32(sim_state.physics_cfg.n_substeps)
-    half_dt := sub_dt * 0.5
     for _ in 0..<sim_state.n_steps_per_update {
         for _ in 0..<sim_state.physics_cfg.n_substeps {
 
             // Compute acceleration due to gravity to make a prediction of the positions
+            // TODO: Here is where I will probably compute viscosity to use for the prediction?
             gravity_dir: [N]f32
             gravity_dir.y = -1
             gravity_acceleration := gravity_dir * sim_state.physics_cfg.gravity
             for i in first..<last {
                 sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * gravity_acceleration
-                sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i]
+                sim_state.positions2[i]  = sim_state.position[i] + sub_dt * sim_state.velocities2[i]
             }
             sync.barrier_wait(&sim_state.thread_barrier)
 
@@ -375,14 +375,10 @@ fluidsim_run_update_step_parallel2 :: proc($N: int, sim_state: ^FluidSimState(N)
             sync.barrier_wait(&sim_state.thread_barrier)
 
             // get the actual acceleration and integrate the velocity
+            // Integrate position and resolve boundary collisions
             for i in first..<last {
                 sim_state.acceleration[i] = calculate_acceleration(i, sim_state.positions2, sim_state.velocities2, sim_state)
                 sim_state.velocity[i] += sub_dt * sim_state.acceleration[i]
-            }
-            sync.barrier_wait(&sim_state.thread_barrier)
-
-            // Integrate position and resolve boundary collisions
-            for i in first..<last {
                 sim_state.position[i] += sub_dt * sim_state.velocity[i]
             }
             resolve_boundary_collisions(sim_state, first, last)
@@ -411,8 +407,8 @@ fluidsim_run_update_step_parallel :: proc($N: int, sim_state: ^FluidSimState(N),
             // get acceleration & integrate k2 and l2
             for i in first..<last {
                 sim_state.acceleration[i] = calculate_acceleration(i, sim_state.position, sim_state.velocity, sim_state)
-                sim_state.velocities2[i] = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
-                sim_state.positions2[i] = sim_state.position[i] + sub_dt * sim_state.velocities2[i]
+                sim_state.velocities2[i]  = sim_state.velocity[i] + sub_dt * sim_state.acceleration[i]
+                sim_state.positions2[i]   = sim_state.position[i] + sub_dt * sim_state.velocities2[i]
             }
             sync.barrier_wait(&sim_state.thread_barrier)
 

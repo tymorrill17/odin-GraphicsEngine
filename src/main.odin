@@ -5,8 +5,8 @@ import vk "vendor:vulkan"
 import "render"
 import "core:log"
 
-APPLICATION_WIDTH  :: 1600
-APPLICATION_HEIGHT :: 900
+APPLICATION_WIDTH  :: 1280
+APPLICATION_HEIGHT :: 720
 
 requested_validation_layers : []cstring : {
     "VK_LAYER_KHRONOS_validation", // Standard validation layer preset
@@ -202,6 +202,7 @@ main :: proc() {
             if imgui.Button("Stop Recording") do render.capture_end_recording(&r)
             imgui.Text("Elapsed Time: %f", render.timer_time_since_last_tick(recording_timer))
         }
+        imgui.DragInt("Quality", &render.g_ffmpeg_quality, 0, 100, 1)
         imgui.End()
 
         aspect_ratio := r.window.aspect_ratio
