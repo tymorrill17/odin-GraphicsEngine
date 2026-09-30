@@ -1,10 +1,9 @@
 
-This article is a showcase of my [particle-based fluid simulation implementation](https://github.com/tymorrill17/odin-GraphicsEngine) using the
+Real-time, interactive fluid simulation using the
 [smoothed-particle hydrodynamics (SPH) method](https://en.wikipedia.org/wiki/Smoothed-particle_hydrodynamics). The visualization
-is done using my own rendering engine (article coming soon) written in [Odin](https://odin-lang.org/).^[Odin is a C-like systems programming
-language. It aims to keep the control and simplicity of C while providing modern conveniences. It's a blast to use for graphics and game programming.]
+is done using my own rendering engine written in Odin.
 
-![Particles sloshing around a box](/docs/videos/intro_demo_loop.mp4)
+https://github.com/user-attachments/assets/cafdaf4c-d8c9-4fcc-8777-f50f52322b02
 
 I was inspired to tackle this project by Sebastian Lague's excellent fluid simulation [video](https://youtu.be/rSKMYc1CQHE), from which I was directed
 to the following papers for many of the implementation details.
@@ -14,7 +13,5 @@ to the following papers for many of the implementation details.
 - Solenthaler and Pajarola, [*Predictive-Corrective Incompressible SPH*](https://doi.org/10.1145/1576246.1531346), SIGGRAPH 2009.
 
 Please check out my personal blog [post](https://tylermorrill.com/articles/fluid_simulator.html) to learn more about how it works!
-
-![Lots and lots of particles (50,000 of them), oh my!](/docs/videos/final_demo.mp4)
 
 
