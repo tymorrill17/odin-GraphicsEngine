@@ -96,6 +96,7 @@ main :: proc() {
         boundary_damping            = 0.95,
         density_smoothing_radius    = 0.35,
         pressure_constant           = 500,
+        viscosity                   = 5,
         rest_density                = 55,
         n_substeps                  = 3,
         time_step                   = 1.0 / 60.0,
@@ -154,6 +155,7 @@ main :: proc() {
         imgui.DragFloat("Boundary Damping Factor", &physics_config.boundary_damping, 0.01);
         imgui.DragFloat("Smoothing Radius", &physics_config.density_smoothing_radius, 0.01, v_min = 0.1);
         imgui.DragFloat("Pressure Constant", &physics_config.pressure_constant, 0.01);
+        imgui.DragFloat("viscosity", &physics_config.viscosity, 0.01);
         imgui.DragFloat("Rest Density", &physics_config.rest_density, 0.01);
         imgui.DragFloat("Time Step", &physics_config.time_step, .0166, v_min = 0);
         imgui.DragFloat("Interaction Strength", &physics_config.interaction_strength, 0.1);

@@ -20,16 +20,17 @@ FluidSimParticleConfig :: struct {
 }
 
 FluidSimPhysicsConfig :: struct {
-    gravity:                  f32,
-    boundary_damping:         f32,
-    density_smoothing_radius: f32,
-    pressure_constant:        f32,
-    rest_density:             f32,
-    n_substeps:               u32,
-    time_step:                f32,
-    max_time_step:            f32,
-    interaction_strength:     f32,
-    interaction_radius:       f32,
+    gravity:                    f32,
+    boundary_damping:           f32,
+    density_smoothing_radius:   f32,
+    pressure_constant:          f32,
+    viscosity:                  f32,
+    rest_density:               f32,
+    n_substeps:                 u32,
+    time_step:                  f32,
+    max_time_step:              f32,
+    interaction_strength:       f32,
+    interaction_radius:         f32,
 };
 
 FluidSimAction :: enum {
@@ -604,10 +605,9 @@ calculate_density :: proc(particle_idx: u32, particle_positions: [][$N]f32, sim_
     for dist, _, ok := neighborhood_iterator_next(&iter); ok; dist, _, ok = neighborhood_iterator_next(&iter) {
         dist_sq := linalg.dot(dist, dist)
         when N == 2 {
-            density += kernel_spikey_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
+            density += kernel_smooth_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
         } else when N == 3 {
-            // TODO: the smoothing kernel still needs to be adapted to 3D
-            density += kernel_spikey_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
+            density += kernel_smooth_3D(dist_sq, sim_state.physics_cfg.density_smoothing_radius)
         }
     }
     assert(density != 0)
@@ -651,7 +651,8 @@ calculate_acceleration :: proc(particle_idx: u32, particle_positions, particle_v
     interaction_acceleration := calculate_interaction_force(particle_idx, particle_positions, particle_velocities, sim_state)
 
     // Get the pressure force and convert it to acceleration by dividing density
-    pressure_acceleration := calculate_pressure_force(particle_idx, particle_positions, sim_state.density, sim_state) / sim_state.density[particle_idx]
+    pressure_acceleration  := calculate_pressure_force(particle_idx, particle_positions, sim_state.density, sim_state) / sim_state.density[particle_idx]
+    viscosity_acceleration := calculate_viscosity_force(particle_idx, particle_positions, particle_velocities, sim_state.density, sim_state) / sim_state.density[particle_idx]
 
     gravity_dir: [N]f32
     gravity_dir.y = -1
@@ -698,6 +699,29 @@ get_random_dir :: proc($N: int) -> [N]f32 {
 }
 
 @(private="file")
+get_shared_viscosity :: proc(velocity, other_velocity: [$N]f32, physics_cfg: ^FluidSimPhysicsConfig) -> [N]f32 {
+    return physics_cfg.viscosity * (other_velocity - velocity)
+}
+
+@(private="file")
+calculate_viscosity_force :: proc(particle_idx: u32, particle_positions: [][$N]f32, particle_velocities: [][N]f32, densities: []f32, sim_state: ^FluidSimState(N)) -> [N]f32 {
+    force: [N]f32 = 0
+    iter := neighborhood_iterator_make(sim_state, particle_positions[particle_idx], raw_data(particle_positions))
+    for dist, index, ok := neighborhood_iterator_next(&iter); ok; dist, index, ok = neighborhood_iterator_next(&iter) {
+        if (index == particle_idx) do continue // Particle does not contribute to its own pressure force
+        dist_sq := linalg.dot(dist, dist)
+
+        viscosity := get_shared_viscosity(particle_velocities[particle_idx], particle_velocities[index], sim_state.physics_cfg)
+        when N == 2 {
+            force += viscosity * kernel_viscosity_laplacian_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius) / densities[index]
+        } else when N == 3 {
+            force += viscosity * kernel_viscosity_laplacian_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius) / densities[index]
+        }
+    }
+    return force
+}
+
+@(private="file")
 calculate_pressure_force :: proc(particle_idx: u32, particle_positions: [][$N]f32, densities: []f32, sim_state: ^FluidSimState(N)) -> [N]f32 {
     force: [N]f32 = 0
     iter := neighborhood_iterator_make(sim_state, particle_positions[particle_idx], raw_data(particle_positions))
@@ -710,7 +734,6 @@ calculate_pressure_force :: proc(particle_idx: u32, particle_positions: [][$N]f3
         when N == 2 {
             force += pressure * dir * kernel_spikey_derivative_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius) / densities[index]
         } else when N == 3 {
-            // TODO: kernel_spikey_derivative_3D
             force += pressure * dir * kernel_spikey_derivative_2D(dist_sq, sim_state.physics_cfg.density_smoothing_radius) / densities[index]
         }
     }
@@ -789,7 +812,6 @@ neighborhood_iterator_next :: proc(it: ^NeighborhoodIterator($N)) -> (dist: [N]f
     }
 }
 
-// TODO: Make 3D versions of these kernel functions
 kernel_smooth_2D :: proc(dist_sq: f32, radius: f32) -> f32 {
     radius_sq := radius * radius
     if dist_sq > radius_sq do return 0
@@ -802,6 +824,7 @@ kernel_smooth_derivative_2D :: proc(dist_sq: f32, radius: f32) -> f32 {
     return -24 / (math.PI * math.pow(radius, 8)) * r * math.pow(radius * radius - dist_sq, 2)
 }
 
+// Spiky: 10 / (pi h^5) * (h - r)^3
 kernel_spikey_2D :: proc(dist_sq: f32, radius: f32) -> f32 {
     r := math.sqrt(dist_sq)
     if r > radius do return 0
@@ -812,4 +835,57 @@ kernel_spikey_derivative_2D :: proc(dist_sq: f32, radius: f32) -> f32 {
     r := math.sqrt(dist_sq)
     if r > radius do return 0
     return -30 / (math.PI * math.pow(radius, 5)) * math.pow(radius - r, 2)
+}
+
+kernel_viscosity_2D :: proc(dist_sq: f32, radius: f32) -> f32 {
+    r := max(math.sqrt(dist_sq), math.F32_EPSILON)
+    if r > radius do return 0
+    h := radius
+    h3 := h * h * h
+    k := 40 / (math.PI * math.pow(h, 5))
+    return k * (h * r * r / 4 - r * r * r / 9 - h3 / 6 * math.ln(r / h) - 5 * h3 / 36)
+}
+
+kernel_viscosity_laplacian_2D :: proc(dist_sq: f32, radius: f32) -> f32 {
+    r := math.sqrt(dist_sq)
+    if r > radius do return 0
+    return 40 / (math.PI * math.pow(radius, 5)) * (radius - r)
+}
+
+kernel_smooth_3D :: proc(dist_sq: f32, radius: f32) -> f32 {
+    radius_sq := radius * radius
+    if dist_sq > radius_sq do return 0
+    return 315 / (64 * math.PI * math.pow(radius, 9)) * math.pow(radius_sq - dist_sq, 3)
+}
+
+kernel_smooth_derivative_3D :: proc(dist_sq: f32, radius: f32) -> f32 {
+    r := math.sqrt(dist_sq)
+    if r > radius do return 0
+    return -945 / (32 * math.PI * math.pow(radius, 9)) * r * math.pow(radius * radius - dist_sq, 2)
+}
+
+kernel_spikey_3D :: proc(dist_sq: f32, radius: f32) -> f32 {
+    r := math.sqrt(dist_sq)
+    if r > radius do return 0
+    return 15 / (math.PI * math.pow(radius, 6)) * math.pow(radius - r, 3)
+}
+
+kernel_spikey_derivative_3D :: proc(dist_sq: f32, radius: f32) -> f32 {
+    r := math.sqrt(dist_sq)
+    if r > radius do return 0
+    return -45 / (math.PI * math.pow(radius, 6)) * math.pow(radius - r, 2)
+}
+
+kernel_viscosity_3D :: proc(dist_sq: f32, radius: f32) -> f32 {
+    r := max(math.sqrt(dist_sq), math.F32_EPSILON)
+    if r > radius do return 0
+    h2 := radius * radius
+    h3 := h2 * radius
+    return 15 / (2 * math.PI * h3) * (-r * r * r / (2 * h3) + r * r / h2 + radius / (2 * r) - 1)
+}
+
+kernel_viscosity_laplacian_3D :: proc(dist_sq: f32, radius: f32) -> f32 {
+    r := math.sqrt(dist_sq)
+    if r > radius do return 0
+    return 45 / (math.PI * math.pow(radius, 6)) * (radius - r)
 }
