@@ -30,8 +30,8 @@ FluidSimPhysicsConfig :: struct {
     n_substeps:                 u32,
     time_step:                  f32,
     max_time_step:              f32,
-    interaction_strength:       f32,
-    interaction_radius:         f32,
+    // interaction_strength:       f32,
+    // interaction_radius:         f32,
 };
 
 FluidSimAction :: enum {
@@ -45,11 +45,11 @@ FluidSimState :: struct($N: int) {
     physics_cfg:            ^FluidSimPhysicsConfig,
     bbox:                   ^BoundingBox(N),
 
+    // input:                  ^render.InputManager,
     // Mouse interaction
-    input:                  ^render.InputManager,
-    interaction_pos:        [N]f32,
-    is_interacting:         bool,
-    interaction:            FluidSimAction,
+    // interaction_pos:        [N]f32,
+    // is_interacting:         bool,
+    // interaction:            FluidSimAction,
 
     // Particle properties
     density:                []f32,
@@ -144,13 +144,12 @@ fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInst
 }
 
 fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^FluidSimParticleConfig, physics_cfg: ^FluidSimPhysicsConfig,
-    bounds: ^BoundingBox($N), input: ^render.InputManager) -> render.ParticleMotion {
+    bounds: ^BoundingBox($N)) -> render.ParticleMotion {
 
     state := new(FluidSimState(N))
     state.system                = system
     state.particle_cfg          = particle_cfg
     state.physics_cfg           = physics_cfg
-    state.input                 = input
     state.color                 = make([]render.float4, system.max_particles)
     state.position              = make([][N]f32, system.max_particles)
     state.velocity              = make([][N]f32, system.max_particles)
@@ -286,7 +285,7 @@ fluidsim_update_particles :: proc($N: int, system: ^render.CPUParticleSystem, dt
     sim_state := cast(^FluidSimState(N))system.motion.data
 
     // Update the changes from the input
-    fluidsim_update_mouse_input(sim_state)
+    // fluidsim_update_mouse_input(sim_state)
 
     // Update the particle system with the new config info if it has changed while the program is running
     system.particle_count    = sim_state.particle_cfg.n_particles
@@ -501,27 +500,27 @@ get_worker_index_range :: proc(particle_count: u32, worker_index, n_worker_threa
 }
 
 // Capture the input state for the current frame so each physics step sees the same input
-@(private="file")
-fluidsim_update_mouse_input :: proc(sim_state: ^FluidSimState($N)) {
-    input := sim_state.input
-    if input == nil do return
-
-    sim_state.is_interacting = false
-    if input.mouse_states[.left].down {
-        sim_state.is_interacting    = true
-        sim_state.interaction       = .pushing
-    } else if input.mouse_states[.right].down {
-        sim_state.is_interacting    = true
-        sim_state.interaction       = .pulling
-    }
-
-    world := input.mouse_position // TODO: convert to actual coords
-    when N == 2 {
-        sim_state.interaction_pos = { world.x, world.y }
-    } else when N == 3 {
-        sim_state.interaction_pos = { world.x, world.y, 0 }
-    }
-}
+// @(private="file")
+// fluidsim_update_mouse_input :: proc(sim_state: ^FluidSimState($N)) {
+//     input := sim_state.input
+//     if input == nil do return
+//
+//     sim_state.is_interacting = false
+//     if input.mouse_states[.left].down {
+//         sim_state.is_interacting    = true
+//         sim_state.interaction       = .pushing
+//     } else if input.mouse_states[.right].down {
+//         sim_state.is_interacting    = true
+//         sim_state.interaction       = .pulling
+//     }
+//
+//     world := input.mouse_position // TODO: convert to actual coords
+//     when N == 2 {
+//         sim_state.interaction_pos = { world.x, world.y }
+//     } else when N == 3 {
+//         sim_state.interaction_pos = { world.x, world.y, 0 }
+//     }
+// }
 
 @(private="file")
 get_grid_cell :: proc(position: [$N]f32, cell_size: f32) -> [N]i32 {
@@ -628,34 +627,34 @@ calculate_all_densities :: proc(particle_positions: [][$N]f32, sim_state: ^Fluid
     }
 }
 
-@(private="file")
-calculate_interaction_force  :: proc(particle_idx: u32, particle_positions, particle_velocities: [][$N]f32, sim_state: ^FluidSimState(N)) -> [N]f32 {
-    interaction_acceleration: [N]f32 = 0
-    if sim_state.is_interacting {
-        // RMB pulls the particles in, LMB button pushes them away
-        interaction_strength := sim_state.interaction == .pulling ? sim_state.physics_cfg.interaction_strength : -sim_state.physics_cfg.interaction_strength
-        interaction_radius   := sim_state.physics_cfg.interaction_radius
-
-        // Hand is interacting, so find the vector from the hand to the particle and find its squared distance
-        particle_to_hand := sim_state.interaction_pos - particle_positions[particle_idx]
-        sqr_dst          := linalg.dot(particle_to_hand, particle_to_hand)
-
-        // If particle is in hand radius, change acceleration on particle
-        if sqr_dst > 0 && sqr_dst < interaction_radius * interaction_radius {
-            dst             := math.sqrt(sqr_dst)
-            center_factor   := 1 - dst / interaction_radius
-            direction       := particle_to_hand / dst // normalize
-            interaction_acceleration += (direction * interaction_strength - particle_velocities[particle_idx]) * center_factor
-        }
-    }
-    return interaction_acceleration
-}
+// @(private="file")
+// calculate_interaction_force  :: proc(particle_idx: u32, particle_positions, particle_velocities: [][$N]f32, sim_state: ^FluidSimState(N)) -> [N]f32 {
+//     interaction_acceleration: [N]f32 = 0
+//     if sim_state.is_interacting {
+//         // RMB pulls the particles in, LMB button pushes them away
+//         interaction_strength := sim_state.interaction == .pulling ? sim_state.physics_cfg.interaction_strength : -sim_state.physics_cfg.interaction_strength
+//         interaction_radius   := sim_state.physics_cfg.interaction_radius
+//
+//         // Hand is interacting, so find the vector from the hand to the particle and find its squared distance
+//         particle_to_hand := sim_state.interaction_pos - particle_positions[particle_idx]
+//         sqr_dst          := linalg.dot(particle_to_hand, particle_to_hand)
+//
+//         // If particle is in hand radius, change acceleration on particle
+//         if sqr_dst > 0 && sqr_dst < interaction_radius * interaction_radius {
+//             dst             := math.sqrt(sqr_dst)
+//             center_factor   := 1 - dst / interaction_radius
+//             direction       := particle_to_hand / dst // normalize
+//             interaction_acceleration += (direction * interaction_strength - particle_velocities[particle_idx]) * center_factor
+//         }
+//     }
+//     return interaction_acceleration
+// }
 
 @(private="file")
 calculate_acceleration :: proc(particle_idx: u32, particle_positions, particle_velocities: [][$N]f32, sim_state: ^FluidSimState(N)) -> [N]f32 {
 
     // Apply interaction force from the mouse
-    interaction_acceleration := calculate_interaction_force(particle_idx, particle_positions, particle_velocities, sim_state)
+    // interaction_acceleration := calculate_interaction_force(particle_idx, particle_positions, particle_velocities, sim_state)
 
     // Get the pressure force and convert it to acceleration by dividing density
     pressure_acceleration  := calculate_pressure_force(particle_idx, particle_positions, sim_state.density, sim_state) / sim_state.density[particle_idx]
@@ -665,7 +664,8 @@ calculate_acceleration :: proc(particle_idx: u32, particle_positions, particle_v
     gravity_dir.y = -1
     gravity_acceleration := gravity_dir * sim_state.physics_cfg.gravity
 
-    return interaction_acceleration + pressure_acceleration + viscosity_acceleration + gravity_acceleration
+    // return interaction_acceleration + pressure_acceleration + viscosity_acceleration + gravity_acceleration
+    return pressure_acceleration + viscosity_acceleration + gravity_acceleration
 }
 
 @(private="file")

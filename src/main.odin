@@ -137,8 +137,8 @@ main :: proc() {
         n_substeps                  = 3,
         time_step                   = 1.0 / 60.0,
         max_time_step               = .25,
-        interaction_strength        = 90,
-        interaction_radius          = 2,
+        // interaction_strength        = 90,
+        // interaction_radius          = 2,
     }
 
     camera_config := render.CameraConfig{
@@ -169,7 +169,7 @@ main :: proc() {
 
     fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
     // Dimension of the particle motion is inferred from bounding box dimension
-    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, &bounding_box, &r.input_manager)
+    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, &bounding_box)
     defer render.particle_system_destroy(&fluidsim_particle_system, &r)
     fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
     append(&r.renderables, &fluidsim_render_object)
@@ -206,8 +206,8 @@ main :: proc() {
         imgui.DragFloat("Viscosity", &physics_config.viscosity, 0.01);
         imgui.DragFloat("Rest Density", &physics_config.rest_density, 0.01);
         imgui.DragFloat("Time Step", &physics_config.time_step, .0166, v_min = 0);
-        imgui.DragFloat("Interaction Strength", &physics_config.interaction_strength, 0.1);
-        imgui.DragFloat("Interaction Radius", &physics_config.interaction_radius, 0.01, v_min = 0);
+        // imgui.DragFloat("Interaction Strength", &physics_config.interaction_strength, 0.1);
+        // imgui.DragFloat("Interaction Radius", &physics_config.interaction_radius, 0.01, v_min = 0);
         {
             min: u32 = 1
             imgui.DragScalar("Substeps", .U32, rawptr(&physics_config.n_substeps), 1, &min);
