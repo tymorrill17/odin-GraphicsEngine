@@ -46,8 +46,7 @@ FluidSimState :: struct($N: int) {
     bbox:                   ^BoundingBox(N),
 
     // Mouse interaction
-    input:                  ^render.Input,
-    camera:                 ^CameraData,
+    input:                  ^render.InputManager,
     interaction_pos:        [N]f32,
     is_interacting:         bool,
     interaction:            FluidSimAction,
@@ -145,14 +144,13 @@ fluidsim_get_material :: proc(renderer: ^render.Renderer) -> render.MaterialInst
 }
 
 fluidsim_state_create :: proc(system: ^render.CPUParticleSystem, particle_cfg: ^FluidSimParticleConfig, physics_cfg: ^FluidSimPhysicsConfig,
-    bounds: ^BoundingBox($N), input: ^render.Input, camera: ^CameraData) -> render.ParticleMotion {
+    bounds: ^BoundingBox($N), input: ^render.InputManager) -> render.ParticleMotion {
 
     state := new(FluidSimState(N))
     state.system                = system
     state.particle_cfg          = particle_cfg
     state.physics_cfg           = physics_cfg
     state.input                 = input
-    state.camera                = camera
     state.color                 = make([]render.float4, system.max_particles)
     state.position              = make([][N]f32, system.max_particles)
     state.velocity              = make([][N]f32, system.max_particles)
@@ -517,11 +515,11 @@ fluidsim_update_mouse_input :: proc(sim_state: ^FluidSimState($N)) {
         sim_state.interaction       = .pulling
     }
 
-    world := render.mouse_world_position_from_viewproj(input, sim_state.camera.viewproj)
+    world := input.mouse_position // TODO: convert to actual coords
     when N == 2 {
         sim_state.interaction_pos = { world.x, world.y }
     } else when N == 3 {
-        sim_state.interaction_pos = world
+        sim_state.interaction_pos = { world.x, world.y, 0 }
     }
 }
 

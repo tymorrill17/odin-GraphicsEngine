@@ -12,8 +12,13 @@ MouseKey :: enum i32 {
 
 Key :: enum i32 {
     tilde   = glfw.KEY_GRAVE_ACCENT,
+    space   = glfw.KEY_SPACE,
     f12     = glfw.KEY_F12,
     r       = glfw.KEY_R,
+    w       = glfw.KEY_W,
+    a       = glfw.KEY_A,
+    s       = glfw.KEY_S,
+    d       = glfw.KEY_D,
 }
 
 KeyState :: struct {
@@ -22,7 +27,7 @@ KeyState :: struct {
     released:   bool, // Release this frame
 }
 
-Input :: struct {
+InputManager :: struct {
     mouse_position:     float2, // Mouse position in window coordinates. Origin at top left
     mouse_delta:        float2, // Change in window coordinates since the last frame
     mouse_ndc:          float2, // Cursor position in clip space: [-1, 1]
@@ -33,10 +38,8 @@ Input :: struct {
 }
 
 // Called at the beginning of every frame, after events have been polled
-@(private)
-input_update :: proc(renderer: ^Renderer) {
-    input       := &renderer.input
-    glfw_window := renderer.window.glfw_window
+input_update :: proc(input: ^InputManager, window: ^Window) {
+    glfw_window := window.glfw_window
 
     // Get the mouse updates
     x, y := glfw.GetCursorPos(glfw_window)
@@ -44,8 +47,8 @@ input_update :: proc(renderer: ^Renderer) {
     input.mouse_delta    = position - input.mouse_position
     input.mouse_position = position
     input.mouse_ndc = {
-        2 * (position.x / f32(renderer.window.extent.x)) - 1,
-        2 * (position.y / f32(renderer.window.extent.y)) - 1,
+        2 * (position.x / f32(window.extent.x)) - 1,
+        2 * (position.y / f32(window.extent.y)) - 1,
     }
     // TODO: potentially include mouse leaving the window or leaving focus here
     input.mouse_captured = !imgui.GetIO().WantCaptureMouse
@@ -67,13 +70,13 @@ input_update :: proc(renderer: ^Renderer) {
 }
 
 // Project the cursor into world space using the inverse viewproj matrix
-mouse_world_position :: proc(input: ^Input, inv_viewproj: float4x4, ndc_depth: f32 = 0) -> float3 {
-    clip  := float4{ input.mouse_ndc.x, input.mouse_ndc.y, ndc_depth, 1 }
-    world := inv_viewproj * clip
-    if world.w != 0 do world /= world.w
-    return world.xyz
-}
-
-mouse_world_position_from_viewproj :: proc(input: ^Input, viewproj: float4x4, ndc_depth: f32 = 0) -> float3 {
-    return mouse_world_position(input, linalg.inverse(viewproj), ndc_depth)
-}
+// mouse_world_position :: proc(input: ^InputManager, inv_viewproj: float4x4, ndc_depth: f32 = 0) -> float3 {
+//     clip  := float4{ input.mouse_ndc.x, input.mouse_ndc.y, ndc_depth, 1 }
+//     world := inv_viewproj * clip
+//     if world.w != 0 do world /= world.w
+//     return world.xyz
+// }
+//
+// mouse_world_position_from_viewproj :: proc(input: ^InputManager, viewproj: float4x4, ndc_depth: f32 = 0) -> float3 {
+//     return mouse_world_position(input, linalg.inverse(viewproj), ndc_depth)
+// }

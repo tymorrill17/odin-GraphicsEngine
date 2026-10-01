@@ -3,6 +3,24 @@ package render
 import "core:math"
 import "core:math/linalg"
 
+CameraConfig :: struct{
+    near_plane:     f32,
+    far_plane:      f32,
+    ortho_scale:    f32,
+    fov:            f32,
+};
+
+CameraData :: struct {
+    viewproj:   float4x4,
+    view:       float4x4,
+    proj:       float4x4,
+};
+
+CameraController :: struct {
+    position:       float3, // position of camera
+    center:         float3, // Where camera is looking
+}
+
 projection_set_orthographic :: proc(left, right, bottom, top, near, far: f32) -> float4x4 {
     proj: float4x4 = 1 // identity
     proj[0, 0] = 2 / (right - left)

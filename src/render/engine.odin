@@ -73,7 +73,6 @@ RendererConfig :: struct {
 
 Renderer :: struct {
     window:                     Window,
-    input:                      Input,
     instance:                   vk.Instance,
     debug_messenger:            vk.DebugUtilsMessengerEXT,
     logical_device:             vk.Device,
@@ -289,30 +288,12 @@ start_frame :: proc(renderer: ^Renderer) {
     poll_events()
     resize_callback(renderer)
     gui_start_frame()
-    input_update(renderer)
-    process_inputs(renderer)
     timer_update(&renderer.timer)
 
     if renderer.recorder.recording && renderer.recorder.framerate > 0 {
         renderer.frame_time = 1.0 / f32(renderer.recorder.framerate)
     } else {
         renderer.frame_time = renderer.timer.frame_time
-    }
-}
-
-process_inputs :: proc(renderer: ^Renderer) {
-    if renderer.input.key_states[.tilde].pressed {
-        renderer.draw_gui = renderer.draw_gui ? false : true
-    }
-    if renderer.input.key_states[.f12].pressed {
-        capture_request_screenshot(renderer)
-    }
-    if renderer.input.key_states[.r].pressed {
-        if !renderer.recorder.recording {
-            capture_start_recording(renderer)
-        } else {
-            capture_end_recording(renderer)
-        }
     }
 }
 

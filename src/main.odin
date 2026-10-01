@@ -18,21 +18,21 @@ requested_device_extensions : []cstring : {
     "VK_KHR_present_mode_fifo_latest_ready",
 }
 
-CameraConfig :: struct{
-    position:       render.float3, // position of camera
-    center:         render.float3, // Where camera is looking
-    near_plane:     f32,
-    far_plane:      f32,
-    scale:          f32,
-    fov:            f32,
-};
-
-CameraData :: struct {
-    viewproj:   render.float4x4,
-    view:       render.float4x4,
-    proj:       render.float4x4,
-};
-
+process_renderer_inputs :: proc(input: ^render.InputManager, renderer: ^render.Renderer) {
+    if input.key_states[.tilde].pressed {
+        renderer.draw_gui = renderer.draw_gui ? false : true
+    }
+    if input.key_states[.f12].pressed {
+        render.capture_request_screenshot(renderer)
+    }
+    if input.key_states[.r].pressed {
+        if !renderer.recorder.recording {
+            render.capture_start_recording(renderer)
+        } else {
+            render.capture_end_recording(renderer)
+        }
+    }
+}
 
 main :: proc() {
 
@@ -54,10 +54,10 @@ main :: proc() {
     defer render.renderer_shutdown(&r)
 
     // Create an instance of the global uniform buffer for each frame in flight
-    global_uniform_buffer := render.buffer_create(&r, size_of(CameraData), u64(r.frames_in_flight), { .UNIFORM_BUFFER }, .CPU_TO_GPU)
+    global_uniform_buffer := render.buffer_create(&r, size_of(render.CameraData), u64(r.frames_in_flight), { .UNIFORM_BUFFER }, .CPU_TO_GPU)
     defer render.buffer_destroy(&r, &global_uniform_buffer)
     render.buffer_map(&r, &global_uniform_buffer)
-    camera_data := CameraData{
+    camera_data := render.CameraData{
         viewproj = (1), // initialize to identity matrix
         view     = (1),
         proj     = (1),
@@ -86,7 +86,7 @@ main :: proc() {
     defer render.pipeline_destroy(&r, &fluid_material.pipeline)
 
     particle_config := FluidSimParticleConfig{
-        spacing         = 0.02,
+        spacing         = 0.05,
         radius          = 0.08,
         n_particles     = 15000,
         default_color   = { 1, 1, 1, 1 },
@@ -107,14 +107,17 @@ main :: proc() {
         interaction_radius          = 2,
     }
 
-    camera_config := CameraConfig{
-        center      = {0, 0, 0},
-        position    = {0, 0, 7},
+    camera_config := render.CameraConfig{
         near_plane  = 0.1,
         far_plane   = 10000,
-        scale       = 10,
+        ortho_scale = 10,
         fov         = 70,
     };
+
+    camera_controller := render.CameraController {
+        center      = {0, 0, 0},
+        position    = {0, 0, 7},
+    }
 
     boundary_width: f32 = 5.5
     boundary_height: f32 = 5
@@ -128,9 +131,10 @@ main :: proc() {
         max = {  half_width,  half_height,  half_depth },
     }
 
+    input: render.InputManager
     fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
     // Dimension of the particle motion is inferred from bounding box dimension
-    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, &bounding_box, &r.input, &camera_data)
+    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, &bounding_box, &input)
     defer render.particle_system_destroy(&fluidsim_particle_system, &r)
     fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
     append(&r.renderables, &fluidsim_render_object)
@@ -139,13 +143,15 @@ main :: proc() {
 
     for !render.window_should_close(&r) {
         render.start_frame(&r)
+        render.input_update(&input, &r.window)
+        process_renderer_inputs(&input, &r)
 
 		imgui.Begin("Camera Config");
-        imgui.DragFloat3("Position", &camera_config.position, 0.1);
-        imgui.DragFloat3("Center", &camera_config.center, 0.1);
+        imgui.DragFloat3("Position", &camera_controller.position, 0.1);
+        imgui.DragFloat3("Center", &camera_controller.center, 0.1);
         imgui.DragFloat("Far Plane", &camera_config.far_plane, 1);
         imgui.DragFloat("Near Plane", &camera_config.near_plane, 0.001);
-        imgui.DragFloat("Orthographic Scale", &camera_config.scale, 0.1);
+        imgui.DragFloat("Orthographic Scale", &camera_config.ortho_scale, 0.1);
         imgui.DragFloat("FOV", &camera_config.fov, 1);
 		imgui.End();
 
@@ -193,15 +199,13 @@ main :: proc() {
             fluidsim_particle_system.motion.started = false
         }
 		imgui.End();
+        if input.key_states[.space].pressed {
+            fluidsim_particle_system.motion.started = fluidsim_particle_system.motion.started ? false : true
+        }
 
 		imgui.Begin("Metrics");
         imgui.Text("FPS: %f", r.timer.fps)
         imgui.Text("Frame Time: %f", r.timer.avg_frame_time)
-        {
-            mouse_world := render.mouse_world_position_from_viewproj(&r.input, camera_data.viewproj)
-            imgui.Text("Mouse Screen: %.1f, %.1f", r.input.mouse_position.x, r.input.mouse_position.y)
-            imgui.Text("Mouse World: %.3f, %.3f", mouse_world.x, mouse_world.y)
-        }
 		imgui.End();
 
         imgui.Begin("Screen Capture")
@@ -221,7 +225,7 @@ main :: proc() {
         aspect_ratio := r.window.aspect_ratio
         up := render.float3{ 0, 1, 0 }
         camera_data.proj = render.projection_set_perspective(camera_config.fov, aspect_ratio, camera_config.near_plane, camera_config.far_plane)
-        camera_data.view = render.view_set_direction(camera_config.position, { 0, 0, -1 }, up)
+        camera_data.view = render.view_set_direction(camera_controller.position, { 0, 0, -1 }, up)
         camera_data.viewproj = camera_data.proj * camera_data.view
         render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame
 
