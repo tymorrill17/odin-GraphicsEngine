@@ -4,6 +4,7 @@ import "thirdparty:imgui"
 import vk "vendor:vulkan"
 import "render"
 import "core:log"
+import "core:math/linalg"
 
 APPLICATION_WIDTH  :: 1280
 APPLICATION_HEIGHT :: 720
@@ -31,6 +32,39 @@ process_renderer_inputs :: proc(input: ^render.InputManager, renderer: ^render.R
         } else {
             render.capture_end_recording(renderer)
         }
+    }
+}
+
+process_camera_inputs :: proc(input: ^render.InputManager, camera_controller: ^render.CameraController) {
+    move_direction: render.float3 = 0
+    right := linalg.cross(camera_controller.forward, camera_controller.up)
+    if input.key_states[.w].down {
+        move_direction += camera_controller.forward
+    }
+    if input.key_states[.s].down {
+        move_direction -= camera_controller.forward
+    }
+    if input.key_states[.d].down {
+        move_direction += right
+    }
+    if input.key_states[.a].down {
+        move_direction -= right
+    }
+    if input.key_states[.e].down {
+        move_direction += camera_controller.up
+    }
+    if input.key_states[.q].down {
+        move_direction -= camera_controller.up
+    }
+    move_dir_length := linalg.length(move_direction)
+    if linalg.length2(move_direction) > 0 {
+        camera_controller.position += move_direction / move_dir_length * camera_controller.move_speed * input.delta_time
+    }
+}
+
+process_fluid_sim_inputs :: proc(input: ^render.InputManager, fluidsim_particle_system: ^render.CPUParticleSystem) {
+    if input.key_states[.space].pressed {
+        fluidsim_particle_system.motion.started = fluidsim_particle_system.motion.started ? false : true
     }
 }
 
@@ -115,8 +149,10 @@ main :: proc() {
     };
 
     camera_controller := render.CameraController {
-        center      = {0, 0, 0},
+        forward     = {0, 0, -1},
+        up          = {0, 1, 0},
         position    = {0, 0, 7},
+        move_speed  = 5
     }
 
     boundary_width: f32 = 5.5
@@ -131,10 +167,9 @@ main :: proc() {
         max = {  half_width,  half_height,  half_depth },
     }
 
-    input: render.InputManager
     fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
     // Dimension of the particle motion is inferred from bounding box dimension
-    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, &bounding_box, &input)
+    fluidsim_particle_system.motion = fluidsim_state_create(&fluidsim_particle_system, &particle_config, &physics_config, &bounding_box, &r.input_manager)
     defer render.particle_system_destroy(&fluidsim_particle_system, &r)
     fluidsim_render_object := render.particle_system_get_render_object(&fluidsim_particle_system)
     append(&r.renderables, &fluidsim_render_object)
@@ -143,16 +178,16 @@ main :: proc() {
 
     for !render.window_should_close(&r) {
         render.start_frame(&r)
-        render.input_update(&input, &r.window)
-        process_renderer_inputs(&input, &r)
+        process_renderer_inputs(&r.input_manager, &r)
+        process_fluid_sim_inputs(&r.input_manager, &fluidsim_particle_system)
+        process_camera_inputs(&r.input_manager, &camera_controller)
 
 		imgui.Begin("Camera Config");
-        imgui.DragFloat3("Position", &camera_controller.position, 0.1);
-        imgui.DragFloat3("Center", &camera_controller.center, 0.1);
         imgui.DragFloat("Far Plane", &camera_config.far_plane, 1);
         imgui.DragFloat("Near Plane", &camera_config.near_plane, 0.001);
         imgui.DragFloat("Orthographic Scale", &camera_config.ortho_scale, 0.1);
         imgui.DragFloat("FOV", &camera_config.fov, 1);
+        imgui.DragFloat("Move Speed", &camera_controller.move_speed, 0.1);
 		imgui.End();
 
 		imgui.Begin("Particle Config");
@@ -199,9 +234,6 @@ main :: proc() {
             fluidsim_particle_system.motion.started = false
         }
 		imgui.End();
-        if input.key_states[.space].pressed {
-            fluidsim_particle_system.motion.started = fluidsim_particle_system.motion.started ? false : true
-        }
 
 		imgui.Begin("Metrics");
         imgui.Text("FPS: %f", r.timer.fps)
@@ -225,7 +257,7 @@ main :: proc() {
         aspect_ratio := r.window.aspect_ratio
         up := render.float3{ 0, 1, 0 }
         camera_data.proj = render.projection_set_perspective(camera_config.fov, aspect_ratio, camera_config.near_plane, camera_config.far_plane)
-        camera_data.view = render.view_set_direction(camera_controller.position, { 0, 0, -1 }, up)
+        camera_data.view = render.view_set_direction(camera_controller.position, camera_controller.forward, camera_controller.up)
         camera_data.viewproj = camera_data.proj * camera_data.view
         render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame
 

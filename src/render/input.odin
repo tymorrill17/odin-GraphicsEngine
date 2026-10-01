@@ -13,9 +13,12 @@ MouseKey :: enum i32 {
 Key :: enum i32 {
     tilde   = glfw.KEY_GRAVE_ACCENT,
     space   = glfw.KEY_SPACE,
+    lshift  = glfw.KEY_LEFT_SHIFT,
     f12     = glfw.KEY_F12,
-    r       = glfw.KEY_R,
+    q       = glfw.KEY_Q,
     w       = glfw.KEY_W,
+    e       = glfw.KEY_E,
+    r       = glfw.KEY_R,
     a       = glfw.KEY_A,
     s       = glfw.KEY_S,
     d       = glfw.KEY_D,
@@ -35,14 +38,16 @@ InputManager :: struct {
     mouse_states:       [MouseKey]KeyState,
 
     key_states:         #sparse[Key]KeyState,
+    delta_time:         f32,
 }
 
 // Called at the beginning of every frame, after events have been polled
-input_update :: proc(input: ^InputManager, window: ^Window) {
-    glfw_window := window.glfw_window
+input_update :: proc(input: ^InputManager, renderer: ^Renderer) {
+    window := renderer.window
 
+    input.delta_time = renderer.timer.frame_time
     // Get the mouse updates
-    x, y := glfw.GetCursorPos(glfw_window)
+    x, y := glfw.GetCursorPos(window.glfw_window)
     position := float2{ f32(x), f32(y) }
     input.mouse_delta    = position - input.mouse_position
     input.mouse_position = position
@@ -55,14 +60,14 @@ input_update :: proc(input: ^InputManager, window: ^Window) {
 
     // Get all button states
     for key in MouseKey {
-        down := glfw.GetMouseButton(glfw_window, i32(key)) == glfw.PRESS
+        down := glfw.GetMouseButton(window.glfw_window, i32(key)) == glfw.PRESS
         input.mouse_states[key].pressed  = down && !input.mouse_states[key].down
         input.mouse_states[key].released = !down && input.mouse_states[key].down
         input.mouse_states[key].down     = down
     }
 
     for key in Key {
-        down := glfw.GetKey(glfw_window, i32(key)) == glfw.PRESS
+        down := glfw.GetKey(window.glfw_window, i32(key)) == glfw.PRESS
         input.key_states[key].pressed  = down && !input.key_states[key].down
         input.key_states[key].released = !down && input.key_states[key].down
         input.key_states[key].down     = down

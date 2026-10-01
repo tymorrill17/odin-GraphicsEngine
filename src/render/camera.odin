@@ -18,7 +18,9 @@ CameraData :: struct {
 
 CameraController :: struct {
     position:       float3, // position of camera
-    center:         float3, // Where camera is looking
+    forward:        float3, // Where camera is pointing
+    up:             float3, // vector pointing upwards for orientation
+    move_speed:     f32,
 }
 
 projection_set_orthographic :: proc(left, right, bottom, top, near, far: f32) -> float4x4 {
@@ -74,5 +76,6 @@ view_set_direction :: proc(position, direction, up: float3) -> float4x4 {
 view_set_target :: proc(position, target, up: float3) -> float4x4 {
    return view_set_direction(position, target - position, up);
 }
+
 
 

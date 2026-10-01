@@ -91,6 +91,7 @@ Renderer :: struct {
     immediate_command:          vk.CommandBuffer,
     immediate_submit_fence:     vk.Fence,
     descriptor_allocator:       DescriptorAllocator, // Contains descriptor pools to allocate descriptor sets
+    input_manager:              InputManager,
 
     frame_acquired_image_sem:   []vk.Semaphore, // Semaphore to let the GPU know the swapchain image has been acquired. One per frame
     frame_render_fence:         []vk.Fence, // Lets the GPU know that the CPU is done issuing rendering commands. One per frame
@@ -287,6 +288,7 @@ wait_idle :: proc(renderer: ^Renderer) {
 start_frame :: proc(renderer: ^Renderer) {
     poll_events()
     resize_callback(renderer)
+    input_update(&renderer.input_manager, renderer)
     gui_start_frame()
     timer_update(&renderer.timer)
 
