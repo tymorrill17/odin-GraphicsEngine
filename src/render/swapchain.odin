@@ -93,6 +93,9 @@ swapchain_create :: proc(renderer: ^Renderer) {
         if mode == vk.PresentModeKHR.MAILBOX {
             present_mode = mode
             break
+        } else if mode == vk.PresentModeKHR.FIFO_LATEST_READY {
+            present_mode = mode
+            break
         }
     }
 

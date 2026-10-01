@@ -43,6 +43,11 @@ device_features_13 := vk.PhysicalDeviceVulkan13Features{ sType = .PHYSICAL_DEVIC
     dynamicRendering                = true,
     shaderDemoteToHelperInvocation  = true,
 }
+device_features_14 := vk.PhysicalDeviceVulkan14Features{ sType = .PHYSICAL_DEVICE_VULKAN_1_4_FEATURES, }
+fifo_latest_ready_feature := vk.PhysicalDevicePresentModeFifoLatestReadyFeaturesKHR{
+    sType = .PHYSICAL_DEVICE_PRESENT_MODE_FIFO_LATEST_READY_FEATURES_KHR,
+    presentModeFifoLatestReady = true
+}
 
 pool_size_ratios :: []PoolSizeRatio{
     {vk.DescriptorType.UNIFORM_BUFFER,         100},
@@ -644,6 +649,8 @@ devices_initialize :: proc(renderer: ^Renderer, request_discrete_GPU: bool, requ
     }
     device_features_11.pNext = &device_features_12
     device_features_12.pNext = &device_features_13
+    device_features_13.pNext = &device_features_14
+    device_features_14.pNext = &fifo_latest_ready_feature
 
     device_create_info := vk.DeviceCreateInfo{
         sType                   = .DEVICE_CREATE_INFO,
