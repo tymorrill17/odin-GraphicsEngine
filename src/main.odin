@@ -24,6 +24,7 @@ CameraConfig :: struct{
     near_plane:     f32,
     far_plane:      f32,
     scale:          f32,
+    fov:            f32,
 };
 
 CameraData :: struct {
@@ -87,7 +88,7 @@ main :: proc() {
     particle_config := FluidSimParticleConfig{
         spacing         = 0.02,
         radius          = 0.08,
-        n_particles     = 4000,
+        n_particles     = 15000,
         default_color   = { 1, 1, 1, 1 },
     }
 
@@ -98,7 +99,7 @@ main :: proc() {
         pressure_constant           = 500,
         near_pressure_multiplier    = 2,
         viscosity                   = 5,
-        rest_density                = 55,
+        rest_density                = 250,
         n_substeps                  = 3,
         time_step                   = 1.0 / 60.0,
         max_time_step               = .25,
@@ -108,20 +109,23 @@ main :: proc() {
 
     camera_config := CameraConfig{
         center      = {0, 0, 0},
-        position    = {0, 0, 1},
+        position    = {0, 0, 7},
         near_plane  = 0.1,
         far_plane   = 10000,
         scale       = 10,
+        fov         = 70,
     };
 
-    boundary_width: f32 = 16.
-    boundary_height: f32 = 9.
+    boundary_width: f32 = 5.5
+    boundary_height: f32 = 5
+    boundary_depth: f32 = 5.5
     half_width := boundary_width * 0.5
     half_height := boundary_height * 0.5
+    half_depth := boundary_depth * 0.5
 
-    bounding_box := BoundingBox2D{
-        min = { -half_width, -half_height },
-        max = {  half_width,  half_height },
+    bounding_box := BoundingBox3D{
+        min = { -half_width, -half_height, -half_depth },
+        max = {  half_width,  half_height,  half_depth },
     }
 
     fluidsim_particle_system := render.particle_system_create(&r, MAX_PARTICLES, (0), particle_mesh, &fluid_material)
@@ -142,6 +146,7 @@ main :: proc() {
         imgui.DragFloat("Far Plane", &camera_config.far_plane, 1);
         imgui.DragFloat("Near Plane", &camera_config.near_plane, 0.001);
         imgui.DragFloat("Orthographic Scale", &camera_config.scale, 0.1);
+        imgui.DragFloat("FOV", &camera_config.fov, 1);
 		imgui.End();
 
 		imgui.Begin("Particle Config");
@@ -171,10 +176,13 @@ main :: proc() {
         imgui.Begin("Boundary")
         imgui.DragFloat("Width", &boundary_width, 0.2)
         imgui.DragFloat("Height", &boundary_height, 0.2)
+        imgui.DragFloat("Depth", &boundary_depth, 0.2)
         bounding_box.max.x = boundary_width * 0.5
         bounding_box.max.y = boundary_height * 0.5
+        bounding_box.max.z = boundary_depth * 0.5
         bounding_box.min.x = -bounding_box.max.x
         bounding_box.min.y = -bounding_box.max.y
+        bounding_box.min.z = -bounding_box.max.z
         imgui.End();
 
 		imgui.Begin("Controls");
@@ -212,9 +220,7 @@ main :: proc() {
 
         aspect_ratio := r.window.aspect_ratio
         up := render.float3{ 0, 1, 0 }
-        camera_data.proj = render.projection_set_orthographic(-aspect_ratio * 0.5 * camera_config.scale, aspect_ratio * 0.5 * camera_config.scale,
-            -0.5 * camera_config.scale, 0.5 * camera_config.scale,
-            camera_config.near_plane, camera_config.far_plane)
+        camera_data.proj = render.projection_set_perspective(camera_config.fov, aspect_ratio, camera_config.near_plane, camera_config.far_plane)
         camera_data.view = render.view_set_direction(camera_config.position, { 0, 0, -1 }, up)
         camera_data.viewproj = camera_data.proj * camera_data.view
         render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame

@@ -250,19 +250,21 @@ fluidsim_state_destroy :: proc($N: int, data: rawptr) {
 @(private="file")
 fluidsim_set_init_particle_positions :: proc(system: ^render.CPUParticleSystem, sim_state: ^FluidSimState($N), particle_cfg: FluidSimParticleConfig) {
     spacing := particle_cfg.radius + particle_cfg.spacing
-    grid_size := int(math.ceil(math.sqrt(f32(system.particle_count))))
+
+    // Arrange particles in a cube centered at origin
+    grid_size := int(math.ceil(math.pow(f32(system.particle_count), 1.0 / f32(N))))
+    for grid_size > 1 && int(math.pow(f32(grid_size - 1), f32(N))) >= int(system.particle_count) do grid_size -= 1 // Guard against float rounding up
 
     offset: [N]f32
-    offset[0] = f32(-(grid_size - 1)) * 0.5 * spacing
-    offset[1] = f32(-(grid_size - 1)) * 0.5 * spacing
+    for d in 0..<N do offset[d] = f32(-(grid_size - 1)) * 0.5 * spacing
 
     for i in 0..<system.particle_count {
-        col := int(i) % grid_size
-        row := int(i) / grid_size
-
         pos: [N]f32
-        pos[0] = f32(col) * spacing + offset[0]
-        pos[1] = f32(row) * spacing + offset[1]
+        rem := int(i)
+        for d in 0..<N {
+            pos[d] = f32(rem % grid_size) * spacing + offset[d]
+            rem /= grid_size
+        }
 
         sim_state.position[i]       = pos
         sim_state.acceleration[i]   = 0
