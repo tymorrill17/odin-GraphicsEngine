@@ -20,6 +20,7 @@ CameraController :: struct {
     position:         float3, // position of camera
     forward:          float3, // Where camera is pointing
     pitch:            f32,    // up/down, 0 is eye level
+    orbit_distance:   f32,
     move_speed:       f32,
     look_sensitivity: f32,
 }
@@ -102,4 +103,17 @@ camera_controller_rotate_pitch :: proc(controller: ^CameraController, angle_radi
     actual_angle_to_rotate := final_pitch - controller.pitch
     controller.pitch = final_pitch
     controller.forward = linalg.normalize(linalg.matrix3_rotate_f32(actual_angle_to_rotate, right) * controller.forward)
+}
+
+camera_controller_orbit :: proc(controller: ^CameraController, yaw_radians, pitch_radians: f32) {
+    orbit_center := controller.position + controller.forward * controller.orbit_distance
+    vector_to_rotate := controller.position - orbit_center
+
+    right := linalg.normalize(linalg.cross(controller.forward, g_world_up))
+    up := linalg.cross(right, controller.forward)
+    new_position := linalg.matrix3_rotate_f32(yaw_radians, up) * vector_to_rotate
+    new_position = linalg.matrix3_rotate_f32(pitch_radians, right) * new_position
+
+    controller.position = orbit_center + new_position
+    controller.forward = linalg.normalize(-new_position)
 }

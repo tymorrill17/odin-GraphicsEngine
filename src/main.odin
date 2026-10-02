@@ -66,15 +66,16 @@ process_camera_inputs :: proc(input: ^render.InputManager, camera_controller: ^r
 
     look_pressed  := input.mouse_states[.left].pressed  || input.mouse_states[.right].pressed
     look_released := input.mouse_states[.left].released || input.mouse_states[.right].released
-    looking       := input.mouse_states[.left].down     || input.mouse_states[.right].down
     if look_pressed {
         render.set_cursor_locked(input.window, true)
     } else if look_released {
         render.set_cursor_locked(input.window, false)
     }
-    if looking {
+    if input.mouse_states[.left].down {
         render.camera_controller_rotate_pitch(camera_controller, -input.mouse_delta.y * camera_controller.look_sensitivity)
         render.camera_controller_rotate_yaw(camera_controller, -input.mouse_delta.x * camera_controller.look_sensitivity)
+    } else if input.mouse_states[.right].down {
+        render.camera_controller_orbit(camera_controller, -input.mouse_delta.x * camera_controller.look_sensitivity, -input.mouse_delta.y * camera_controller.look_sensitivity)
     }
 }
 
@@ -168,6 +169,7 @@ main :: proc() {
     camera_controller.position = {0, 0, 7}
     camera_controller.move_speed = 5
     camera_controller.look_sensitivity = 0.003 // radians per pixel
+    camera_controller.orbit_distance = 7
 
     boundary_width: f32 = 5.5
     boundary_height: f32 = 5
