@@ -98,6 +98,19 @@ set_fullscreen :: proc(window: ^Window, enable: bool) {
     window.resized    = true
 }
 
+// Hide the cursor and lock it to the window so it can't leave while dragging
+set_cursor_locked :: proc(window: ^Window, locked: bool) {
+    if locked {
+        glfw.SetInputMode(window.glfw_window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+        if glfw.RawMouseMotionSupported() {
+            glfw.SetInputMode(window.glfw_window, glfw.RAW_MOUSE_MOTION, 1)
+        }
+    } else {
+        glfw.SetInputMode(window.glfw_window, glfw.RAW_MOUSE_MOTION, 0)
+        glfw.SetInputMode(window.glfw_window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+    }
+}
+
 @(private)
 poll_events :: proc() {
     glfw.PollEvents()

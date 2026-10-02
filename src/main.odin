@@ -64,8 +64,15 @@ process_camera_inputs :: proc(input: ^render.InputManager, camera_controller: ^r
         camera_controller.position += move_direction / move_dir_length * camera_controller.move_speed * input.delta_time
     }
 
-    // Mouse movement
-    if input.mouse_captured && input.mouse_states[.left].down {
+    look_pressed  := input.mouse_states[.left].pressed  || input.mouse_states[.right].pressed
+    look_released := input.mouse_states[.left].released || input.mouse_states[.right].released
+    looking       := input.mouse_states[.left].down     || input.mouse_states[.right].down
+    if look_pressed {
+        render.set_cursor_locked(input.window, true)
+    } else if look_released {
+        render.set_cursor_locked(input.window, false)
+    }
+    if looking {
         render.camera_controller_rotate_pitch(camera_controller, -input.mouse_delta.y * camera_controller.look_sensitivity)
         render.camera_controller_rotate_yaw(camera_controller, -input.mouse_delta.x * camera_controller.look_sensitivity)
     }

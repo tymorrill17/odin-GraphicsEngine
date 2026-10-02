@@ -211,6 +211,8 @@ renderer_initialize :: proc(renderer: ^Renderer, renderer_cfg: RendererConfig) {
     renderer.current_swpch_render_sem   = &renderer.swapchain_render_sem[renderer.swapchain.image_index]
     renderer.current_command            = &renderer.frame_commands[renderer.frame_index]
 
+    renderer.input_manager = input_manager_create(&renderer.window)
+
     // Create a buffer to copy the draw image to for capturing screenshots
     renderer.capturing_primed = false
     recorder_initialize(renderer, &renderer.recorder)

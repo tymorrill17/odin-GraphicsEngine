@@ -31,6 +31,7 @@ KeyState :: struct {
 }
 
 InputManager :: struct {
+    window:             ^Window,
     mouse_position:     float2, // Mouse position in window coordinates. Origin at top left
     mouse_delta:        float2, // Change in window coordinates since the last frame
     mouse_ndc:          float2, // Cursor position in clip space: [-1, 1]
@@ -39,6 +40,17 @@ InputManager :: struct {
 
     key_states:         #sparse[Key]KeyState,
     delta_time:         f32,
+}
+
+input_manager_create :: proc(window: ^Window) -> InputManager {
+    return InputManager{
+        window         = window,
+        mouse_position = 0,
+        mouse_delta    = 0,
+        mouse_ndc      = 0,
+        mouse_captured = false,
+        delta_time     = 0,
+    }
 }
 
 // Called at the beginning of every frame, after events have been polled
