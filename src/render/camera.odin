@@ -17,11 +17,14 @@ CameraData :: struct {
 };
 
 CameraController :: struct {
-    position:       float3, // position of camera
-    forward:        float3, // Where camera is pointing
-    up:             float3, // vector pointing upwards for orientation
-    move_speed:     f32,
+    position:         float3, // position of camera
+    forward:          float3, // Where camera is pointing
+    pitch:            f32,    // up/down, 0 is eye level
+    move_speed:       f32,
+    look_sensitivity: f32,
 }
+
+g_world_up :: float3{ 0, 1, 0 }
 
 projection_set_orthographic :: proc(left, right, bottom, top, near, far: f32) -> float4x4 {
     proj: float4x4 = 1 // identity
@@ -51,7 +54,7 @@ projection_set_perspective :: proc(vertical_fov, aspect_ratio, near, far: f32) -
 
 view_set_direction :: proc(position, direction, up: float3) -> float4x4 {
     forward := linalg.normalize0(direction)
-    right   := linalg.cross(forward, up)
+    right   := linalg.normalize0(linalg.cross(forward, up))
     rel_up  := linalg.cross(right, forward)
 
     view: float4x4 = 1 // identity
@@ -77,5 +80,26 @@ view_set_target :: proc(position, target, up: float3) -> float4x4 {
    return view_set_direction(position, target - position, up);
 }
 
+camera_controller_create :: proc() -> CameraController {
+    return CameraController{
+        position         = 0,
+        forward          = { 0, 0, -1 },
+        pitch            = 0,
+        move_speed       = 0,
+        look_sensitivity = 0,
+    }
+}
 
+// Rotate the camera orientation about the world's up vector by radians
+camera_controller_rotate_yaw :: proc(controller: ^CameraController, angle_radians: f32) {
+    controller.forward = linalg.normalize(linalg.matrix3_rotate_f32(angle_radians, g_world_up) * controller.forward)
+}
 
+camera_controller_rotate_pitch :: proc(controller: ^CameraController, angle_radians: f32) {
+    right := linalg.normalize0(linalg.cross(controller.forward, g_world_up))
+    max_pitch := f32(math.to_radians(89.0))
+    final_pitch := linalg.clamp(controller.pitch + angle_radians, -max_pitch, max_pitch)
+    actual_angle_to_rotate := final_pitch - controller.pitch
+    controller.pitch = final_pitch
+    controller.forward = linalg.normalize(linalg.matrix3_rotate_f32(actual_angle_to_rotate, right) * controller.forward)
+}

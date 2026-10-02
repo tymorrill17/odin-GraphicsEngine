@@ -36,8 +36,11 @@ process_renderer_inputs :: proc(input: ^render.InputManager, renderer: ^render.R
 }
 
 process_camera_inputs :: proc(input: ^render.InputManager, camera_controller: ^render.CameraController) {
+
+    // WASD movement
     move_direction: render.float3 = 0
-    right := linalg.cross(camera_controller.forward, camera_controller.up)
+    right := linalg.normalize(linalg.cross(camera_controller.forward, render.g_world_up))
+    up := linalg.cross(right, camera_controller.forward)
     if input.key_states[.w].down {
         move_direction += camera_controller.forward
     }
@@ -51,14 +54,20 @@ process_camera_inputs :: proc(input: ^render.InputManager, camera_controller: ^r
         move_direction -= right
     }
     if input.key_states[.e].down {
-        move_direction += camera_controller.up
+        move_direction += up
     }
     if input.key_states[.q].down {
-        move_direction -= camera_controller.up
+        move_direction -= up
     }
     move_dir_length := linalg.length(move_direction)
     if linalg.length2(move_direction) > 0 {
         camera_controller.position += move_direction / move_dir_length * camera_controller.move_speed * input.delta_time
+    }
+
+    // Mouse movement
+    if input.mouse_captured && input.mouse_states[.left].down {
+        render.camera_controller_rotate_pitch(camera_controller, -input.mouse_delta.y * camera_controller.look_sensitivity)
+        render.camera_controller_rotate_yaw(camera_controller, -input.mouse_delta.x * camera_controller.look_sensitivity)
     }
 }
 
@@ -148,12 +157,10 @@ main :: proc() {
         fov         = 70,
     };
 
-    camera_controller := render.CameraController {
-        forward     = {0, 0, -1},
-        up          = {0, 1, 0},
-        position    = {0, 0, 7},
-        move_speed  = 5
-    }
+    camera_controller := render.camera_controller_create()
+    camera_controller.position = {0, 0, 7}
+    camera_controller.move_speed = 5
+    camera_controller.look_sensitivity = 0.003 // radians per pixel
 
     boundary_width: f32 = 5.5
     boundary_height: f32 = 5
@@ -188,6 +195,7 @@ main :: proc() {
         imgui.DragFloat("Orthographic Scale", &camera_config.ortho_scale, 0.1);
         imgui.DragFloat("FOV", &camera_config.fov, 1);
         imgui.DragFloat("Move Speed", &camera_controller.move_speed, 0.1);
+        imgui.DragFloat("Look Sensitivity", &camera_controller.look_sensitivity, 0.0001);
 		imgui.End();
 
 		imgui.Begin("Particle Config");
@@ -257,7 +265,7 @@ main :: proc() {
         aspect_ratio := r.window.aspect_ratio
         up := render.float3{ 0, 1, 0 }
         camera_data.proj = render.projection_set_perspective(camera_config.fov, aspect_ratio, camera_config.near_plane, camera_config.far_plane)
-        camera_data.view = render.view_set_direction(camera_controller.position, camera_controller.forward, camera_controller.up)
+        camera_data.view = render.view_set_direction(camera_controller.position, camera_controller.forward, render.g_world_up)
         camera_data.viewproj = camera_data.proj * camera_data.view
         render.buffer_write_data_at_index(&r, &global_uniform_buffer, rawptr(&camera_data), r.frame_index) // Update at the right index for this frame
 
